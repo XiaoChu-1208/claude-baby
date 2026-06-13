@@ -1,0 +1,22 @@
+{
+  "name": "english-speaking-coach",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "自用英语口语陪练：浏览器 STT + Claude 大脑 + ElevenLabs Flash 语音，本地薄服务转发并藏 key",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.74.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "https-proxy-agent": "^9.1.0",
+    "undici": "^6.21.0",
+    "ws": "^8.21.0"
+  },
+  "engines": {
+    "node": ">=18.17"
+  }
+}

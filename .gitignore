@@ -1,0 +1,14 @@
+node_modules/
+.env
+*.log
+.DS_Store
+
+# 个人数据 / 机器特定 —— 每个用户自己生成,不进仓库
+# 喊词唤醒的声纹模型(enroll_claude.py 生成)
+claude_ref.json
+# 唤醒词原始录音
+claude_samples/
+# 垫播音频(generate-acks.js 生成,跟 ELEVENLABS_VOICE_ID 绑定)
+acks/
+# 本地会话记录(若放在了项目内)
+.coach-sessions/

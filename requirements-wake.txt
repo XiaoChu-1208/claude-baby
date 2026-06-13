@@ -1,0 +1,7 @@
+# 喊唤醒词("Claude")功能的 Python 依赖(可选)。装一次:
+#   brew install portaudio        # PyAudio 编译要它(macOS)
+#   pip3 install -r requirements-wake.txt
+# 然后:python3 enroll_claude.py   录 4 遍 Claude → 生成 claude_ref.json
+# 启用:.env 里 COACH_WAKE=1;不装/没录则用「敲两下」唤醒。
+EfficientWord-Net
+sounddevice

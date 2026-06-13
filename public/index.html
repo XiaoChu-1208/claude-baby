@@ -1,0 +1,602 @@
+<!doctype html>
+<html lang="en" data-theme="paper">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Speaking Coach</title>
+<style>
+  /* ===== 调色：暖纸色为主 + 暗色录音棚，单一黏土橙强调色（非渐变球，符合 frontend-vault） ===== */
+  :root[data-theme="paper"] {
+    --bg: #f3efe6;
+    --ink: #2b2722;
+    --muted: #9a9082;
+    --faint: #c5bcab;
+    --accent: #c4622d;
+    --line: #e4ddcf;
+  }
+  :root[data-theme="booth"] {
+    --bg: #1b1815;
+    --ink: #ece6db;
+    --muted: #8a8174;
+    --faint: #4a443c;
+    --accent: #e07a4d;
+    --line: #2c2823;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: ui-sans-serif, -apple-system, "Segoe UI", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+    transition: background 400ms cubic-bezier(0.2,0,0,1), color 400ms cubic-bezier(0.2,0,0,1);
+  }
+
+  /* ===== 顶栏：logo 槽 + 场景切换 + 右侧控制 ===== */
+  .topbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 20;
+    display: flex; align-items: center; gap: 18px;
+    padding: 18px 22px;
+    pointer-events: none;
+  }
+  .topbar > * { pointer-events: auto; }
+  .logo {
+    width: 30px; height: 30px; border-radius: 8px;
+    border: 1px solid var(--line);
+    display: grid; place-items: center;
+    color: var(--muted); font-size: 11px; letter-spacing: .04em;
+    flex: 0 0 auto;
+  }
+  .scenarios { display: flex; gap: 4px; flex-wrap: wrap; }
+  .scn {
+    font: inherit; font-size: 13px; line-height: 1;
+    color: var(--muted); background: transparent;
+    border: 1px solid transparent; border-radius: 999px;
+    padding: 7px 12px; cursor: pointer;
+    transition: color 100ms cubic-bezier(0.2,0,0,1), border-color 100ms cubic-bezier(0.2,0,0,1), background 100ms cubic-bezier(0.2,0,0,1);
+  }
+  .scn:hover { color: var(--ink); }
+  .scn[aria-pressed="true"] { color: var(--accent); border-color: var(--line); background: color-mix(in oklab, var(--accent) 8%, transparent); }
+  .scn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .spacer { flex: 1 1 auto; }
+  .ctrl {
+    font: inherit; font-size: 12.5px; color: var(--muted);
+    background: transparent; border: 1px solid var(--line); border-radius: 999px;
+    padding: 7px 12px; cursor: pointer;
+    transition: color 100ms cubic-bezier(0.2,0,0,1), border-color 100ms cubic-bezier(0.2,0,0,1);
+  }
+  .ctrl:hover { color: var(--ink); border-color: var(--muted); }
+  .ctrl:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ===== 舞台：中央声波环 ===== */
+  .stage {
+    position: fixed; inset: 0; display: grid; place-items: center; z-index: 5;
+  }
+  canvas#orb { width: min(46vmin, 340px); height: min(46vmin, 340px); display: block; }
+  .hint {
+    position: fixed; left: 0; right: 0; bottom: 26px; z-index: 12;
+    text-align: center; color: var(--muted); font-size: 13px; letter-spacing: .02em;
+    min-height: 18px; pointer-events: none;
+  }
+
+  /* ===== 对话：左右悬浮、无气泡、旧的淡出 ===== */
+  .transcript {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    top: 84px; bottom: 56px; width: min(92vw, 720px); z-index: 8;
+    display: flex; flex-direction: column; justify-content: flex-end;
+    gap: 14px; overflow: hidden;
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 16%, #000 100%);
+            mask-image: linear-gradient(to bottom, transparent 0%, #000 16%, #000 100%);
+    pointer-events: none;
+  }
+  .turn { max-width: 78%; font-size: 17px; line-height: 1.5; }
+  .turn.ai { align-self: flex-start; text-align: left; color: var(--ink); }
+  .turn.me { align-self: flex-end; text-align: right; color: color-mix(in oklab, var(--ink) 62%, var(--bg)); }
+  .turn .who {
+    display: block; font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--faint); margin-bottom: 3px;
+  }
+  .turn .tip {
+    display: block; margin-top: 6px; font-size: 13.5px; font-style: italic;
+    color: var(--accent);
+  }
+  .turn.live { color: var(--muted); }
+
+  /* ===== 开始遮罩（首次手势，解锁麦克风 + 自动播放）===== */
+  .overlay {
+    position: fixed; inset: 0; z-index: 40; display: grid; place-items: center;
+    background: color-mix(in oklab, var(--bg) 86%, transparent);
+    backdrop-filter: blur(2px);
+  }
+  .overlay.hide { display: none; }
+  .start {
+    font: inherit; cursor: pointer; border: 1px solid var(--line); background: transparent;
+    color: var(--ink); border-radius: 16px; padding: 22px 30px; text-align: center;
+    transition: border-color 200ms cubic-bezier(0.2,0,0,1), transform 80ms;
+  }
+  .start:hover { border-color: var(--accent); }
+  .start:active { transform: scale(0.985); }
+  .start b { display: block; font-size: 19px; font-weight: 600; margin-bottom: 6px; }
+  .start span { display: block; font-size: 13px; color: var(--muted); max-width: 320px; }
+
+  .err { color: var(--accent); }
+  audio { display: none; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="logo" title="换成你的 logo">LOGO</div>
+    <div class="scenarios" id="scenarios">
+      <button class="scn" data-scn="free" aria-pressed="true">自由聊</button>
+      <button class="scn" data-scn="alignment" aria-pressed="false">Alignment</button>
+      <button class="scn" data-scn="goals" aria-pressed="false">季度目标</button>
+      <button class="scn" data-scn="standup" aria-pressed="false">站会</button>
+      <button class="scn" data-scn="roadmap" aria-pressed="false">Roadmap</button>
+    </div>
+    <div class="spacer"></div>
+    <button class="ctrl" id="modelBtn" title="Haiku 快 / Sonnet 准">Haiku</button>
+    <button class="ctrl" id="themeBtn" title="切换暖纸 / 录音棚">暗色</button>
+  </div>
+
+  <div class="stage"><canvas id="orb"></canvas></div>
+  <div class="transcript" id="transcript"></div>
+  <div class="hint" id="hint"></div>
+
+  <div class="overlay" id="overlay">
+    <button class="start" id="startBtn">
+      <b>按一下开始</b>
+      <span>直接说话，中英都行、自动识别。说完停一下它就回；开口或点中间那个圈可打断。<br><b style="font-weight:600">Control + Esc</b> 暂停/继续（不录你的声音）；切走标签会自动暂停。</span>
+    </button>
+  </div>
+
+  <audio id="player"></audio>
+
+<script>
+//==================================================================
+// 配置
+//==================================================================
+const SILENCE_MS = 1300;     // 说完判定：开口后这么久没声音 → 录音断句，送去转写
+const SPEECH_GATE = 0.035;   // 开口判定：麦音量超过它就认为你开始说话了（启动录音断句）
+const BARGE_GATE = 0.05;     // 语音打断阈值（外放因回声消除会压制你的声音，语音打断不一定灵；点中央圈最稳）
+const BARGE_HOLD_MS = 160;   // 要持续这么久才确认是打断，避免回声残留/瞬间噪声误触发
+const OPENER = "Let's begin. Give a short, natural opening line in character for this scenario, then ask me your first question.";
+
+//==================================================================
+// 状态
+//==================================================================
+let state = 'idle'; // idle | listening | user_speaking | thinking | ai_speaking
+let scenario = 'free';
+let model = 'haiku';
+let history = [];        // 发给 Claude 的消息（含一条隐藏的开场指令）
+let paused = false, autoPaused = false; // 暂停（右Option+空格 / 切走标签自动暂停）→ 不录你的声音
+
+const $ = (id) => document.getElementById(id);
+const hint = $('hint');
+const transcript = $('transcript');
+const audioEl = $('player');
+
+const HINTS = {
+  idle: '', listening: '请说（中英都行）…', user_speaking: '● 录音中…',
+  thinking: '转写 / 思考…', ai_speaking: 'Speaking…（说话或点圈打断）',
+};
+function setState(s) { state = s; hint.textContent = HINTS[s] || ''; hint.classList.remove('err'); }
+function setError(msg) { hint.textContent = msg; hint.classList.add('err'); }
+
+//==================================================================
+// 对话渲染（无气泡，悬浮，入场动效按 vault 规范 400ms）
+//==================================================================
+function addTurn(side, text) {
+  const el = document.createElement('div');
+  el.className = 'turn ' + side;
+  const who = document.createElement('span'); who.className = 'who';
+  who.textContent = side === 'ai' ? 'Coach' : 'You';
+  el.appendChild(who);
+
+  // 把 "Tip:" 单独拎出来用强调色（方便记词/改法）
+  const lines = text.split('\n');
+  const body = document.createElement('span');
+  body.textContent = lines.filter(l => !/^\s*tip:/i.test(l)).join(' ').trim();
+  el.appendChild(body);
+  const tipLine = lines.find(l => /^\s*tip:/i.test(l));
+  if (tipLine) {
+    const tip = document.createElement('span'); tip.className = 'tip';
+    tip.textContent = tipLine.trim();
+    el.appendChild(tip);
+  }
+
+  transcript.appendChild(el);
+  while (transcript.children.length > 40) transcript.removeChild(transcript.firstChild);
+  el.animate(
+    [{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'translateY(0)' }],
+    { duration: 400, easing: 'cubic-bezier(0.2,0,0,1)', fill: 'both' }
+  );
+  return el;
+}
+
+// 实时显示我正在说的话（一个临时的 live 行）
+let liveEl = null;
+function renderLive(text) {
+  if (!text) { if (liveEl) { liveEl.remove(); liveEl = null; } return; }
+  if (!liveEl) { liveEl = addTurn('me', ''); liveEl.classList.add('live'); }
+  liveEl.querySelector('.who').nextSibling.textContent = text;
+}
+function clearLive() { if (liveEl) { liveEl.remove(); liveEl = null; } }
+function clearTranscript() { transcript.innerHTML = ''; liveEl = null; }
+
+//==================================================================
+// 音频图：mic 分析器（驱动声波环 + barge-in 门控）+ tts 分析器（AI 说话时驱动环）
+//==================================================================
+let audioCtx, micAnalyser, ttsAnalyser, micBuf, ttsBuf, ttsNode, mediaStream = null;
+
+async function initAudio() {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  await audioCtx.resume();
+
+  // 开 AEC：浏览器自带回声消除，对抗外放。这条流同时用于：测音量(VAD/声波环) + 录音(MediaRecorder→Scribe)
+  mediaStream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+  });
+  micAnalyser = audioCtx.createAnalyser(); micAnalyser.fftSize = 1024;
+  audioCtx.createMediaStreamSource(mediaStream).connect(micAnalyser);
+  micBuf = new Uint8Array(micAnalyser.fftSize);
+
+  // TTS 走 Web Audio，顺手取它的振幅给环用
+  ttsNode = audioCtx.createMediaElementSource(audioEl);
+  ttsAnalyser = audioCtx.createAnalyser(); ttsAnalyser.fftSize = 1024;
+  ttsNode.connect(ttsAnalyser); ttsAnalyser.connect(audioCtx.destination);
+  ttsBuf = new Uint8Array(ttsAnalyser.fftSize);
+}
+
+function rms(analyser, buf) {
+  if (!analyser) return 0;
+  analyser.getByteTimeDomainData(buf);
+  let s = 0;
+  for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; s += v * v; }
+  return Math.sqrt(s / buf.length);
+}
+const micLevel = () => rms(micAnalyser, micBuf);
+const ttsLevel = () => rms(ttsAnalyser, ttsBuf);
+
+//==================================================================
+// 中央声波环（canvas，单色，功能性状态指示——非渐变球）
+//==================================================================
+const orb = $('orb');
+const octx = orb.getContext('2d');
+let dpr = Math.max(1, window.devicePixelRatio || 1);
+function sizeOrb() {
+  dpr = Math.max(1, window.devicePixelRatio || 1);
+  const r = orb.getBoundingClientRect();
+  orb.width = r.width * dpr; orb.height = r.height * dpr;
+}
+sizeOrb(); window.addEventListener('resize', sizeOrb);
+
+let smooth = 0;
+let bargeAccum = 0; // VAD 打断累计：AI 说话时麦持续有声就累加
+function accent() { return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#c4622d'; }
+function inkColor() { return getComputedStyle(document.documentElement).getPropertyValue('--ink').trim() || '#2b2722'; }
+
+function frame(t) {
+  const w = orb.width, h = orb.height, cx = w / 2, cy = h / 2;
+  const base = Math.min(w, h) * 0.26;
+  octx.clearRect(0, 0, w, h);
+
+  // 当前音量：AI 说话看 tts，其他看麦
+  let lvl = state === 'ai_speaking' ? ttsLevel() : (state === 'idle' ? 0 : micLevel());
+  smooth += (lvl - smooth) * 0.2;
+
+  const breath = 1 + 0.03 * Math.sin(t / 900);
+  const c = accent();
+
+  // 柔和内盘（很淡的实色，不是渐变）
+  octx.beginPath();
+  octx.arc(cx, cy, base * 0.62 * breath, 0, Math.PI * 2);
+  octx.fillStyle = hexA(c, 0.07); octx.fill();
+
+  if (state === 'thinking') {
+    // 思考：缓慢自转的一段弧，不是 spinner
+    const a0 = (t / 700) % (Math.PI * 2);
+    octx.beginPath();
+    octx.arc(cx, cy, base, a0, a0 + Math.PI * 0.7);
+    octx.strokeStyle = hexA(inkColor(), 0.5);
+    octx.lineWidth = 2 * dpr; octx.lineCap = 'round'; octx.stroke();
+  } else {
+    // 主环：半径/粗细随音量；说话越大越亮越粗
+    const r = base * (1 + smooth * 0.55) * breath;
+    octx.beginPath(); octx.arc(cx, cy, r, 0, Math.PI * 2);
+    octx.strokeStyle = hexA(c, 0.85);
+    octx.lineWidth = (2 + smooth * 11) * dpr; octx.stroke();
+
+    // 说话时一圈外扩的细回声
+    if ((state === 'user_speaking' || state === 'ai_speaking') && smooth > 0.02) {
+      octx.beginPath(); octx.arc(cx, cy, r + base * 0.28 * smooth, 0, Math.PI * 2);
+      octx.strokeStyle = hexA(c, 0.18 * smooth * 8); octx.lineWidth = 1.5 * dpr; octx.stroke();
+    }
+  }
+
+  // VAD：倾听时判断你开口 / 说完（驱动录音断句）；AI 说话时判断你是否要打断
+  if (paused) {
+    bargeAccum = 0;
+  } else if (state === 'listening' || state === 'user_speaking') {
+    const lvl = micLevel();
+    if (lvl > SPEECH_GATE) {
+      if (!speechDetected) { speechDetected = true; setState('user_speaking'); }
+      lastVoiceMs = t;
+    } else if (speechDetected && (t - lastVoiceMs) > SILENCE_MS) {
+      stopRecorder(true); // 说完 → 停录音、送 Scribe 转写
+    }
+  } else if (state === 'ai_speaking') {
+    // 语音打断：AI 说话时不录音，但持续量 AEC 后的麦音量，你真开口就打断（不用按键）
+    if (micLevel() > BARGE_GATE) { bargeAccum += 16; if (bargeAccum >= BARGE_HOLD_MS) { bargeAccum = 0; bargeIn(); } }
+    else { bargeAccum = Math.max(0, bargeAccum - 28); }
+  } else { bargeAccum = 0; }
+
+  requestAnimationFrame(frame);
+}
+function hexA(hex, a) {
+  hex = hex.replace('#', '');
+  if (hex.length === 3) hex = hex.split('').map(x => x + x).join('');
+  const n = parseInt(hex, 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${Math.min(1, a)})`;
+}
+requestAnimationFrame(frame);
+
+//==================================================================
+// 语音输入：浏览器录音(MediaRecorder) + VAD 断句 → ElevenLabs Scribe 转写
+// 准、免按键、自动认中英；AI 说话/思考时不录 → 不收回声、不存半句
+//==================================================================
+let shouldListen = false; // 会话是否已开始
+let mediaRecorder = null, recChunks = [], recMime = '', recording = false;
+let speechDetected = false, lastVoiceMs = 0, pendingTranscribe = false;
+
+function pickMime() {
+  const opts = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
+  for (const m of opts) if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m;
+  return '';
+}
+
+// 进入倾听：开一段新录音，等你开口（VAD 在帧循环里判断开口/说完）
+function enterListening() {
+  if (paused) return; // 暂停中不开录音
+  setState('listening');
+  startRecorder();
+}
+function startRecorder() {
+  if (!mediaStream || recording || paused) return;
+  recChunks = []; speechDetected = false; lastVoiceMs = 0; pendingTranscribe = false;
+  try {
+    recMime = pickMime();
+    mediaRecorder = recMime ? new MediaRecorder(mediaStream, { mimeType: recMime }) : new MediaRecorder(mediaStream);
+  } catch (_) {
+    try { mediaRecorder = new MediaRecorder(mediaStream); recMime = ''; } catch (e) { return; }
+  }
+  mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
+  mediaRecorder.onstop = onRecorderStop;
+  try { mediaRecorder.start(); recording = true; } catch (_) {}
+}
+// 停止录音；transcribe=true 且确有说话 → 去转写，否则丢弃
+function stopRecorder(transcribe) {
+  if (!recording) return;
+  recording = false;
+  pendingTranscribe = transcribe && speechDetected;
+  try { mediaRecorder.stop(); } catch (_) {}
+}
+function onRecorderStop() {
+  const blob = new Blob(recChunks, { type: recMime || 'audio/webm' });
+  recChunks = [];
+  if (pendingTranscribe && blob.size > 1500) transcribeAndSend(blob);
+}
+async function transcribeAndSend(blob) {
+  setState('thinking');
+  try {
+    const r = await fetch('/api/stt', {
+      method: 'POST', headers: { 'content-type': blob.type || 'audio/webm' }, body: blob,
+    });
+    if (!r.ok) throw new Error('stt ' + r.status);
+    const { text } = await r.json();
+    const t = (text || '').trim();
+    if (!t) { enterListening(); return; } // 没转出东西 → 重新听
+    addTurn('me', t);
+    history.push({ role: 'user', content: t });
+    serverChat(t);
+  } catch (err) {
+    setError('转写失败：' + (err.message || err) + '（看终端日志 / 代理）');
+    enterListening();
+  }
+}
+
+//==================================================================
+// 大脑 + 语音
+//==================================================================
+// 开场：让后端启动常驻进程并返回 AI 的开场白
+async function serverStart() {
+  setState('thinking');
+  try {
+    const r = await fetch('/api/session/start', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ scenario, model }),
+    });
+    if (!r.ok) throw new Error('start ' + r.status);
+    const { text } = await r.json();
+    if (!text) throw new Error('empty');
+    addTurn('ai', text);
+    history.push({ role: 'assistant', content: text });
+    await speak(text);
+    if (state === 'ai_speaking') enterListening();
+  } catch (err) {
+    setError('开场失败：' + (err.message || err) + '（看终端日志 / 代理）');
+    enterListening();
+  }
+}
+
+// 一轮对话：只把我这句新话发给常驻进程（它自己记上下文）
+async function serverChat(text) {
+  setState('thinking');
+  try {
+    const r = await fetch('/api/chat', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text, messages: history.slice(-16), scenario, model }),
+    });
+    if (!r.ok) throw new Error('chat ' + r.status);
+    const { text: reply } = await r.json();
+    if (!reply) throw new Error('empty');
+    addTurn('ai', reply);
+    history.push({ role: 'assistant', content: reply });
+    await speak(reply);
+    if (state === 'ai_speaking') enterListening(); // 没被打断 → 回到倾听
+  } catch (err) {
+    setError('出错了：' + (err.message || err) + '（看终端日志 / 代理）');
+    enterListening();
+  }
+}
+
+let playAbort = null, playbackDone = null;
+function speak(text) {
+  return new Promise(async (resolve) => {
+    setState('ai_speaking');
+    playAbort = new AbortController();
+    let done = false; const finish = () => { if (!done) { done = true; resolve(); } };
+    playbackDone = finish;
+    try {
+      const r = await fetch('/api/tts', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text }), signal: playAbort.signal,
+      });
+      if (!r.ok || !r.body) { finish(); return; }
+      const canMSE = 'MediaSource' in window && MediaSource.isTypeSupported('audio/mpeg');
+      if (canMSE) playMSE(r, finish);
+      else {
+        const buf = await r.arrayBuffer();
+        audioEl.src = URL.createObjectURL(new Blob([buf], { type: 'audio/mpeg' }));
+        audioEl.onended = finish;
+        audioEl.play().catch(finish);
+      }
+    } catch (_) { finish(); }
+  });
+}
+function playMSE(resp, finish) {
+  const ms = new MediaSource();
+  audioEl.src = URL.createObjectURL(ms);
+  audioEl.onended = finish;
+  ms.addEventListener('sourceopen', async () => {
+    let sb;
+    try { sb = ms.addSourceBuffer('audio/mpeg'); } catch (_) { finish(); return; }
+    const reader = resp.body.getReader();
+    const queue = []; let ended = false;
+    const pump = () => {
+      if (sb.updating || queue.length === 0) {
+        if (ended && !sb.updating && queue.length === 0) { try { ms.endOfStream(); } catch (_) {} }
+        return;
+      }
+      try { sb.appendBuffer(queue.shift()); } catch (_) {}
+    };
+    sb.addEventListener('updateend', pump);
+    audioEl.play().catch(() => {});
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) { ended = true; pump(); break; }
+        queue.push(value); pump();
+      }
+    } catch (_) { ended = true; pump(); }
+  }, { once: true });
+}
+function bargeIn() {
+  if (state !== 'ai_speaking') return;
+  try { playAbort && playAbort.abort(); } catch (_) {}
+  try { audioEl.pause(); } catch (_) {}
+  if (playbackDone) playbackDone();
+  enterListening(); // 让它闭嘴 + 从这一刻全新开一段录音听你
+}
+
+// 暂停：停录音、AI 也闭嘴，绝不录你的声音
+function pauseConv(auto) {
+  if (paused) return;
+  paused = true; autoPaused = !!auto;
+  stopRecorder(false);                 // 停录音并丢弃，不转写
+  try { playAbort && playAbort.abort(); } catch (_) {}
+  try { audioEl.pause(); } catch (_) {}
+  if (playbackDone) playbackDone();
+  bargeAccum = 0;
+  hint.textContent = '⏸ 已暂停 —— Control+Esc 继续'; hint.classList.remove('err');
+}
+function resumeConv() {
+  if (!paused) return;
+  paused = false; autoPaused = false;
+  enterListening(); // 重新开录音听你
+}
+function togglePause() { paused ? resumeConv() : pauseConv(false); }
+
+//==================================================================
+// 场景 / 控制
+//==================================================================
+function setScenario(key) {
+  scenario = key;
+  document.querySelectorAll('.scn').forEach(b =>
+    b.setAttribute('aria-pressed', String(b.dataset.scn === key)));
+  if (shouldListen) { history = []; clearTranscript(); startOpener(); }
+}
+function startOpener() {
+  // 启动常驻进程 + 让 AI 先开口（这条隐藏指令在后端注入，不渲染）
+  history = [{ role: 'user', content: OPENER }];
+  serverStart();
+}
+
+$('scenarios').addEventListener('click', (e) => {
+  const b = e.target.closest('.scn'); if (b) setScenario(b.dataset.scn);
+});
+$('modelBtn').addEventListener('click', () => {
+  model = model === 'haiku' ? 'sonnet' : 'haiku';
+  $('modelBtn').textContent = model === 'haiku' ? 'Haiku' : 'Sonnet';
+  // 换模型 = 重启常驻进程（模型在开进程时定死），会重开一轮
+  if (shouldListen) { clearTranscript(); startOpener(); }
+});
+$('themeBtn').addEventListener('click', () => {
+  const cur = document.documentElement.getAttribute('data-theme');
+  const next = cur === 'paper' ? 'booth' : 'paper';
+  document.documentElement.setAttribute('data-theme', next);
+  $('themeBtn').textContent = next === 'paper' ? '暗色' : '暖色';
+});
+
+// 点中央声波环 = 立刻打断它说话（最稳的打断方式，外放也 100% 有效）
+document.querySelector('.stage').addEventListener('click', () => {
+  if (state === 'ai_speaking') bargeIn();
+});
+// 键盘：Control+Esc = 暂停/继续；纯空格 = 打断/收尾兜底
+window.addEventListener('keydown', (e) => {
+  if (!shouldListen) return;
+  if (e.code === 'Escape' && e.ctrlKey) { e.preventDefault(); togglePause(); return; } // 暂停/继续
+  if (paused) return;
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (state === 'ai_speaking') bargeIn();
+    else if (state === 'user_speaking') stopRecorder(true);
+  }
+});
+
+// 切走标签/窗口失焦 → 自动暂停（不录你的声音）；切回来自动继续
+document.addEventListener('visibilitychange', () => {
+  if (!shouldListen) return;
+  if (document.hidden) { if (!paused) pauseConv(true); }
+  else if (paused && autoPaused) resumeConv();
+});
+
+//==================================================================
+// 开始（首次手势：解锁麦克风 + 自动播放）
+//==================================================================
+$('startBtn').addEventListener('click', async () => {
+  if (!('MediaRecorder' in window) || !navigator.mediaDevices) { setError('这个浏览器不支持录音，请用 Chrome'); return; }
+  try {
+    await initAudio();
+    shouldListen = true;
+    $('overlay').classList.add('hide');
+    startOpener(); // 开场白播完会自动 enterListening() 开始录你
+  } catch (err) {
+    setError('麦克风/音频启动失败：' + (err.message || err));
+  }
+});
+</script>
+</body>
+</html>

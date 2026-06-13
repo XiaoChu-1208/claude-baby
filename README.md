@@ -1,18 +1,24 @@
-# Speaking Coach — 自用英语口语陪练
+# Claude Baby — 语音驱动的桌面宠物 Claude 助手 (a voice-driven desktop-pet Claude assistant)
 
-打开网页，麦克风常开：你说话它静音倾听、你说完它才用语音回你，像真人来回。专练公司英语考试的商务场景（alignment / 季度目标取舍 / 站会 / roadmap）。
+> **Claude Baby** is a voice-driven desktop-pet Claude assistant. You talk to a pixel pet on your desktop; it does real agentic work (reads/edits files, runs commands, searches the web) and replies in a synthesized voice — hands-free Claude Code. It spawns your local `claude` CLI so it runs on your **Claude subscription, not API credits**, and uses ElevenLabs for speech-to-text and text-to-speech, plus a local "Claude" wake word.
 
-- **听你说（STT）**：浏览器自带 Web Speech API（en-US，免费、瞬时）
-- **大脑**：Claude（默认 Haiku 求快，界面可切 Sonnet 求质量），系统提示=商务英语陪练，回复 1–3 句
-  - 默认 `BRAIN=claudecode`：本地服务 spawn 你已登录的 `claude` CLI（无头模式），**吃 Claude 订阅、不花 API credits**。前提：本机装了 Claude Code 且已登录。
-  - `BRAIN=api`：直连 Anthropic API（吃 API 钱包，需 console 充值）。充值后想切回再用。
-- **念给你听（TTS）**：ElevenLabs Flash（低延迟、省一半 credit），流式边到边播
-- **本地薄服务**：`server.js` 托管网页 + 藏两个 key + 转发 + 出站走代理
+**Claude Baby** 是一个语音驱动的桌面宠物 Claude 助手——本质是「动口不动手地使唤 Claude Code」。对着桌面上的像素宠物说话，它用工具真干活（读写文件、跑命令、搜索 web），再用合成语音回你，听到「Claude」就跳出来。它 spawn 本机已登录的 `claude` CLI——**吃 Claude 订阅、不花 API credits**；语音走 ElevenLabs（STT + TTS）。桌宠（[clawd-on-desk](https://github.com/XiaoChu-1208/clawd-on-desk)）是「身体 / 脸」，本仓库的 `coach-engine.js` 是「大脑」。英语口语陪练只是它顺带的一个小模式。
+
+## 核心特性 / Features
+
+- **语音对话 + 真干活（agent 模式）**：开全工具、自动批准（headless），完整答案进桌宠聊天栏，TTS 只念口语小结。
+- **吃订阅，不吃 API**：spawn `claude` 时删掉子进程的 `ANTHROPIC_API_KEY`，强制走订阅 OAuth。
+- **开口即打断（barge-in）**：它说话时你一开口（主麦音量监听，非喊词）就立刻掐掉它、轮到你说。
+- **喊词唤醒「Claude」**：本地少样本（EfficientWord-Net），无 key、不调云。
+- **STT 可离线可云**：本机 whisper.cpp（离线免费）或 ElevenLabs Scribe 兜底。
+- **会话持久化 + 自愈**：落盘可 `--resume` 接上下文；会话丢失自动起新会话重试，超时自动重启大脑。
+- **英语陪练模式（coach）**：项目早期的英语口语陪练保留为一个模式（关工具、强制 1–2 句、商务场景），`/coach` 进入。也有一条纯浏览器链路（`server.js` + Web Speech API），见下文。
 
 ## 跑起来（一条命令）
 
 ```bash
-cd ~/Desktop/同步/english-speaking-coach && npm start
+git clone https://github.com/XiaoChu-1208/claude-baby.git
+cd claude-baby && npm install && npm start
 ```
 
 `npm start` 会**起服务 + 自动开 Chrome** 到 `http://localhost:5178`。第一次先 `npm install`。
@@ -116,6 +122,26 @@ cd ~/Desktop/同步/english-speaking-coach && npm start
 - 隐藏对话再显示、`./start.sh` 重启引擎，都能看回上次记录（重启时自动 `--resume` 最近会话接上上下文）。
 - **右键菜单**（coach 模式才显示）：**新建会话**（全新上下文 + 清空）/ **切换会话**（子菜单列最近会话，当前的打勾，点一下 `--resume` 切过去并恢复它的记录与 mode/model）/ **结束会话**。
 - 实现：菜单/手势 → 引擎 `POST /session/new` `/session/switch` `/sessions` `/stop` `/toggle-session`（见 `coach-engine.js` 会话存储段、`clawd-on-desk/src/menu.js`）。
+
+## 常见问题 / FAQ
+
+### Claude Baby 是什么？
+Claude Baby 是一个语音驱动的桌面宠物 Claude 助手：桌面上的像素宠物是「身体」，本仓库的 `coach-engine.js` 是「大脑」。你对它说话，它用 Claude 做 agent 干活（读写文件、跑命令、搜索 web），再用 ElevenLabs 合成语音回你，并能在听到「Claude」时跳出来。目标是「比直接敲 Claude Code 更便捷」——动口不动手。英语陪练只是其中一个可切的次要模式。
+
+### 它会消耗我的 Anthropic API 额度吗？
+不会。引擎 spawn 你本机已登录的 `claude` CLI，并在 spawn 时**特意删掉子进程里的 `ANTHROPIC_API_KEY`**，强制它走你的 Claude 订阅 OAuth。所以它吃的是订阅（你平时用的那个），不花 API credits。只有语音（ElevenLabs STT/TTS）按 ElevenLabs 自己的额度计费。
+
+### 怎么打断它说话？
+两种方式：它正用语音念回复时**你直接开口说话**，引擎监听主麦音量、你一出声就立刻掐掉它的语音并把回合交给你；或者**单击桌宠**强制打断。打断判据是音量而非喊词，所以长篇回复也能可靠打断。门槛可用 `COACH_BARGE_RMS` / `COACH_BARGE_SUSTAIN_MS` 调。
+
+### 支持 Windows / Linux 吗？
+目前面向 **macOS**：抓麦克风用 ffmpeg 的 `avfoundation`、播放用 `afplay`、喊词唤醒依赖 PortAudio。移植到其他平台需替换音频采集与播放后端。其余逻辑（Node 引擎、Claude CLI、ElevenLabs）跨平台。
+
+### 和 clawd-on-desk 是什么关系？
+clawd-on-desk 是开源的 Electron 桌面宠物（AGPL-3.0），提供像素宠物的显示与动画——即「身体」。本仓库是「大脑」，通过本地端口与它对接（引擎 → 桌宠 `POST /say`，桌宠 → 引擎控制端口）。两者配合才完整；本仓库同样采用 AGPL-3.0。
+
+### 不联网 / 在墙内能用吗？
+大脑（`claude` CLI）走你本机的网络与代理。语音里 ElevenLabs 在墙外，墙内需在 `.env` 配 `HTTPS_PROXY`。若把 STT 设为本机 whisper.cpp（`COACH_STT=local`），转写完全离线、不出网。
 
 ## 后续可加
 

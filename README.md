@@ -1,150 +1,317 @@
-# Claude Baby — 语音驱动的桌面宠物 Claude 助手 (a voice-driven desktop-pet Claude assistant)
+# Claude Baby — a voice-driven desktop-pet Claude Code agent
 
-> **Claude Baby** is a voice-driven desktop-pet Claude assistant. You talk to a pixel pet on your desktop; it does real agentic work (reads/edits files, runs commands, searches the web) and replies in a synthesized voice — hands-free Claude Code. It spawns your local `claude` CLI so it runs on your **Claude subscription, not API credits**, and uses ElevenLabs for speech-to-text and text-to-speech, plus a local "Claude" wake word.
+> **Claude Baby is a hands-free, voice-controlled Claude Code agent that lives in a desktop pet.** You talk to a little pixel creature on your screen; it does real work — reads and edits files, runs shell commands, searches the web, uses your skills — and answers back in a synthesized voice. It runs on your **Claude subscription, not pay-as-you-go API credits**, by driving your already-logged-in `claude` CLI. Say "Claude" to wake it, talk to give it a task, and just start speaking to interrupt.
 
-**Claude Baby** 是一个语音驱动的桌面宠物 Claude 助手——本质是「动口不动手地使唤 Claude Code」。对着桌面上的像素宠物说话，它用工具真干活（读写文件、跑命令、搜索 web），再用合成语音回你，听到「Claude」就跳出来。它 spawn 本机已登录的 `claude` CLI——**吃 Claude 订阅、不花 API credits**；语音走 ElevenLabs（STT + TTS）。桌宠（[clawd-on-desk](https://github.com/XiaoChu-1208/clawd-on-desk)）是「身体 / 脸」，本仓库的 `coach-engine.js` 是「大脑」。英语口语陪练只是它顺带的一个小模式。
+![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
+![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![Node](https://img.shields.io/badge/node-%E2%89%A518.17-brightgreen)
 
-## 核心特性 / Features
+It is **Claude Code you can talk to**. Instead of sitting in a terminal, you keep working; the pet listens in the background, jumps out when called, does the task, and tells you when it is done — then gets out of your way.
 
-- **语音对话 + 真干活（agent 模式）**：开全工具、自动批准（headless），完整答案进桌宠聊天栏，TTS 只念口语小结。
-- **吃订阅，不吃 API**：spawn `claude` 时删掉子进程的 `ANTHROPIC_API_KEY`，强制走订阅 OAuth。
-- **开口即打断（barge-in）**：它说话时你一开口（主麦音量监听，非喊词）就立刻掐掉它、轮到你说。
-- **喊词唤醒「Claude」**：本地少样本（EfficientWord-Net），无 key、不调云。
-- **STT 可离线可云**：本机 whisper.cpp（离线免费）或 ElevenLabs Scribe 兜底。
-- **会话持久化 + 自愈**：落盘可 `--resume` 接上下文；会话丢失自动起新会话重试，超时自动重启大脑。
-- **英语陪练模式（coach）**：项目早期的英语口语陪练保留为一个模式（关工具、强制 1–2 句、商务场景），`/coach` 进入。也有一条纯浏览器链路（`server.js` + Web Speech API），见下文。
+> ### 🙏 Built on Clawd on Desk
+> Claude Baby would not exist without **[Clawd on Desk](https://github.com/rullerzhou-afk/clawd-on-desk)** by **[@rullerzhou-afk](https://github.com/rullerzhou-afk)** — the wonderful open-source desktop pet that reacts to your AI coding agent in real time. Claude Baby reuses that pet as its body and adds a voice-driven agent brain on top. Huge thanks to the original author and contributors. See [Claude Baby vs Clawd on Desk](#claude-baby-vs-clawd-on-desk) for how they differ and which to choose.
 
-## 跑起来（一条命令）
+- **This repo (the "brain"):** https://github.com/XiaoChu-1208/claude-baby
+- **The pet (the "body"):** original [rullerzhou-afk/clawd-on-desk](https://github.com/rullerzhou-afk/clawd-on-desk); Claude Baby uses the [XiaoChu-1208/clawd-on-desk](https://github.com/XiaoChu-1208/clawd-on-desk) fork, which adds the `CLAWD_COACH_MODE` integration this brain talks to.
 
-```bash
-git clone https://github.com/XiaoChu-1208/claude-baby.git
-cd claude-baby && npm install && npm start
+---
+
+## Table of contents
+
+1. [What is Claude Baby?](#what-is-claude-baby)
+2. [Claude Baby vs Clawd on Desk](#claude-baby-vs-clawd-on-desk)
+3. [Features](#features)
+4. [How it works](#how-it-works)
+5. [Requirements & supported conditions](#requirements--supported-conditions)
+6. [Getting started (step by step)](#getting-started-step-by-step)
+7. [Configuration reference (`.env`)](#configuration-reference-env)
+8. [Usage](#usage)
+9. [Voice pipeline (STT / TTS / wake word)](#voice-pipeline-stt--tts--wake-word)
+10. [Troubleshooting](#troubleshooting)
+11. [FAQ](#faq)
+12. [Privacy & data](#privacy--data)
+13. [License](#license)
+
+---
+
+## What is Claude Baby?
+
+Claude Baby is a **voice-driven agent built on Claude Code**. A pixel pet sits on your desktop as the face; a Node.js engine (`coach-engine.js`) is the brain. When you speak, the engine transcribes your voice, sends it to a locally-running `claude` process that uses tools to get real work done, and reads the reply back to you out loud. The goal is to make Claude Code **more convenient than a terminal** — fully hands-free and always within earshot, so you can delegate a task with your voice while you keep doing something else.
+
+It is **not** a thin chatbot over the Anthropic API. It drives the real Claude Code CLI, so it has the same tools, skills, and agentic abilities you already use — and it bills against your **Claude subscription**, not API credits.
+
+**Good for:** quick coding and file edits, running commands, codebase questions, web research, and any "just do this for me" task you'd rather speak than type.
+
+---
+
+## Claude Baby vs Clawd on Desk
+
+Claude Baby is built on **[Clawd on Desk](https://github.com/rullerzhou-afk/clawd-on-desk)** and is meant to complement, not replace it. The key difference is **passive vs active**:
+
+- **Clawd on Desk (the original)** is a *passive* companion. It *watches* your AI coding agent and reacts in real time — thinking, typing, celebrating, sleeping. You still drive the agent yourself by typing in a terminal/IDE. It is cross-platform (Windows, macOS, Linux), supports many agents (Claude Code, Codex, Copilot, Gemini, Cursor, and more), and ships rich pet themes.
+- **Claude Baby (this project)** turns that pet into an *active, voice-first interface*. You don't type — you **speak**, and the pet *becomes* how you operate Claude Code: it listens, runs the agent, and talks back. It is macOS-only (because of the audio stack) and Claude-subscription-driven.
+
+| | Clawd on Desk (original) | Claude Baby (this project) |
+|---|---|---|
+| Role | Passive status companion | Active voice interface |
+| You interact by | Typing in your terminal/IDE | **Speaking** to the pet |
+| Output | Animations / status | **Synthesized voice** + chat bubble |
+| Drives the agent? | No — it reacts to it | **Yes** — it runs Claude Code for you |
+| Agents | Claude Code, Codex, Copilot, Gemini, Cursor, … | Claude Code (via your subscription) |
+| Platform | Windows · macOS · Linux | macOS only |
+| Voice (STT/TTS), wake word | — | Yes |
+
+**Which should I use?**
+- Choose **Clawd on Desk** if you want a delightful, low-friction status pet while you keep coding by hand, on any OS, with any agent.
+- Choose **Claude Baby** if you want to operate Claude Code **hands-free by voice** on macOS — delegate tasks out loud, get spoken answers, and call the agent without touching the keyboard.
+
+---
+
+## Features
+
+- **Talk to Claude, hands-free.** Speak naturally; it listens, works, and replies by voice.
+- **Real agentic work.** Full tools with auto-approval (headless `bypassPermissions`): read/edit files, run commands, search the web, and use skills inside a working directory you choose.
+- **Subscription, not API credits.** It spawns your local `claude` CLI and strips `ANTHROPIC_API_KEY` from the child process, forcing subscription OAuth — no surprise API bills.
+- **Barge-in: just start talking.** While it is speaking, the moment you speak it stops and gives you the turn. Interruption is triggered by your **microphone volume**, not a keyword, so it works even during long answers. Clicking the pet also interrupts.
+- **Wake word "Claude" (optional).** Fully local, few-shot wake-word detection (EfficientWord-Net) — no cloud, no key. Shout "Claude" and the pet pops out.
+- **Offline or cloud speech-to-text.** A local `whisper.cpp` server (free, private, no network) or ElevenLabs Scribe.
+- **Natural voice output.** ElevenLabs Flash TTS, streamed, with an optional "telephone/walkie-talkie" effect.
+- **Persistent, self-healing sessions.** Conversations are saved and resumable (`--resume`); if a session is lost the engine starts a fresh one and retries, and it restarts the brain on timeout instead of getting stuck.
+- **Model switching on the fly.** Haiku (fast, default), Sonnet, or Opus — say "switch to opus", type `/model opus`, or POST to the control port.
+- **Bilingual input.** Speech recognition auto-detects English and Chinese.
+
+---
+
+## How it works
+
+```
+  You (voice)
+      │  microphone
+      ▼
+┌─────────────────────┐   spawns    ┌───────────────────────┐
+│  coach-engine.js    │ ──────────▶ │  claude CLI (headless)│  ← your Claude subscription
+│  (the "brain")      │ stream-json │  tools · skills · agent│
+│  STT ▸ Claude ▸ TTS │ ◀────────── └───────────────────────┘
+└─────────┬───────────┘
+          │  HTTP POST /say  (localhost)
+          ▼
+┌─────────────────────┐
+│   clawd-on-desk     │  the desktop pet — animations, chat bubbles
+│  (the "body/face")  │  Electron app, run with CLAWD_COACH_MODE=1
+└─────────────────────┘
 ```
 
-`npm start` 会**起服务 + 自动开 Chrome** 到 `http://localhost:5178`。第一次先 `npm install`。
-（不想自动开浏览器：`OPEN=0 npm start`。）
+1. **Listen** — the microphone is captured and transcribed (local Whisper, or ElevenLabs Scribe).
+2. **Think & act** — your text goes to a long-lived `claude` process (reused across turns, context kept via `--resume`); it uses tools to do the work.
+3. **Speak** — the reply is synthesized with ElevenLabs and played back; the full text also appears in the pet's chat bubble.
+4. **Pet ↔ engine** — the engine drives the pet over `POST /say` (pet port from `~/.clawd/runtime.json`, default `23333`); the pet sends clicks/control to the engine's port (default `23390`).
 
-聊天走**常驻的 `claude` 进程**：点开始/切场景时开一次、整段对话复用它、自己记上下文，所以每轮不再冷启动。只有切场景或切 Haiku/Sonnet 时会重开一次（那是没办法，模型/系统提示在开进程时定死）。
+---
 
-## 配置（默认走订阅，省心）
+## Requirements & supported conditions
 
-1. **大脑** — 默认 `BRAIN=claudecode`，**不需要 Anthropic key**，只要本机 Claude Code 已登录即可（就是你平时用的那个订阅）。
-   - ELEVENLABS_API_KEY 已填好（语音那段）。
-   - 充值了想切 API 直连：`.env` 改 `BRAIN=api` 并填 `ANTHROPIC_API_KEY`。
-2. **HTTPS_PROXY** — 北京/墙内必填。STT(Google) + ElevenLabs 在墙外（聊天走本机 claude，它自己会用系统代理）：
-   - 本地服务出站走代理 → `.env` 填 `HTTPS_PROXY=http://127.0.0.1:7890`（换成你 Clash/Verge 的 http 口）。**你 shell 若已 export 代理，会自动认到，可不填。**
-   - **浏览器本身也要在代理下**，否则 Web Speech 连不上 Google。跟手感取决于代理质量，不是代码问题。
+**Operating system: macOS only (for now).** The audio layer uses macOS-specific tools — `ffmpeg` with `avfoundation` for the microphone, `afplay` for playback, and PortAudio for the wake word. Everything else (Node engine, Claude CLI, ElevenLabs) is cross-platform, so a Windows/Linux port mainly means swapping the audio backends. Apple Silicon and Intel both work.
 
-> 注意：claudecode 模式下，本地服务 spawn `claude` 时**特意删掉了子进程里的 `ANTHROPIC_API_KEY`**——否则 CLI 会优先用那个 key（空 API 钱包）而不走订阅。所以 `.env` 里就算填了 key，claudecode 模式也不会用它。
+You also need:
 
-## 用法
+- **An active Claude subscription** (e.g. Pro or Max) with the **Claude Code CLI installed and signed in**. Without a working `claude` login the brain cannot start.
+- **An ElevenLabs account + API key** — for text-to-speech, and for speech-to-text unless you set up local Whisper.
+- **The clawd-on-desk pet app** — Claude Baby is the brain only; the pet is the visible body.
+- **A microphone**, with permission granted to whatever runs the engine.
+- **Internet** to reach Claude and ElevenLabs. Local Whisper removes the network need for transcription; restricted networks can route the engine through `HTTPS_PROXY`.
 
-- 进页面点「按一下开始」（这一下手势同时解锁麦克风和自动播放）。
-- 顶部选场景：自由聊 / Alignment / 季度目标 / 站会 / Roadmap —— 切换即清空重开，AI 先开场白。
-- 直接说英语就行；停顿约 1 秒它就当你说完、开始回。
-- **它说话时你一开口就能打断**（barge-in）。**空格键**=手动兜底：AI 说话时按它闭嘴、你说话时按立刻发送。
-- 右上角可切 **Haiku/Sonnet** 和 **暖色/暗色**。
+---
 
-## 几个旋钮（在 `public/index.html` 顶部）
+## Getting started (step by step)
 
-- `SILENCE_MS`（默认 1100）：说完判定的静默时长，嫌它抢话就调大。
-- `BARGE_GATE`（默认 0.045）：插话的麦音量门，外放误触发就调大、戴耳机可调小。
-- 音色/语速：`server.js` 里 `VOICE_ID` 和 `voice_settings`。
+Follow these in order. **Steps 1–6 are required; 7–9 are optional.**
 
-## 耳机 vs 外放
+### 1. Install Node.js (≥ 18.17)
+```bash
+brew install node        # or use nvm
+node -v                  # confirm ≥ 18.17
+```
 
-- **戴耳机**：物理断回环，常开+打断最丝滑，**推荐**。
-- **外放**：已开浏览器 AEC（回声消除）+ 音量门控挡回声，能用但偶尔会把 AI 的话当成你的。真要硬刚外放，把 STT 挪到本地服务用 Whisper/ElevenLabs 转写（后路，先不做）。
+### 2. Install and log in to the Claude Code CLI — the brain
+```bash
+npm install -g @anthropic-ai/claude-code   # see https://docs.claude.com for the latest method
+claude                                      # run once, sign in to your subscription
+```
+Confirm `claude` works in your terminal before continuing. The engine launches it for you and forces subscription auth (it removes `ANTHROPIC_API_KEY` from the child process).
 
-## 安全
+### 3. Install ffmpeg
+```bash
+brew install ffmpeg
+```
 
-- 两个 key 只在 `.env`（`.gitignore` 已排除），绝不进 HTML/仓库。
-- 换 key 后记得同步 `.env`。
+### 4. Get the desktop pet (clawd-on-desk)
+```bash
+git clone https://github.com/XiaoChu-1208/clawd-on-desk.git
+cd clawd-on-desk && npm install
+```
 
-## 桌宠引擎：首次安装的前置动作（必读）
+### 5. Get Claude Baby and install dependencies
+```bash
+git clone https://github.com/XiaoChu-1208/claude-baby.git
+cd claude-baby && npm install
+```
 
-桌宠引擎（`coach-engine.js`，语音驱动的通用 Claude 助手）是这个项目现在的主体。装它要先备齐下面这些——**前四项必装,缺了起不来**：
+### 6. Configure your ElevenLabs key
+```bash
+cp .env.example .env
+# edit .env and set ELEVENLABS_API_KEY (get one at https://elevenlabs.io)
+# also set COACH_WORKDIR to the directory you want the agent to work in
+```
 
-**必需**
-1. **Node ≥ 18.17** —— 然后 `npm install`。
-2. **Claude Code CLI，已安装且已登录订阅** —— 引擎的「大脑」。它会 spawn 你本机的 `claude` 进程、并**特意删掉子进程里的 `ANTHROPIC_API_KEY`**，强制走你的订阅 OAuth（不花 API credits）。先确认终端里 `claude` 能跑、已登录。
-3. **ffmpeg** —— 抓麦克风 + 语音电话失真。`brew install ffmpeg`。
-4. **ElevenLabs API key** —— 复制 `.env.example` 为 `.env`，填 `ELEVENLABS_API_KEY`（发声用；STT 云端兜底 Scribe 也用它）。
-5. **clawd-on-desk（桌宠本体）跑起来，且开 `CLAWD_COACH_MODE`** —— 它是「身体/脸」，引擎是「大脑」，两者走本地端口对接。
-6. **macOS 麦克风权限** —— 给运行引擎的终端授权（系统设置 → 隐私 → 麦克风）。
+### 7. (Optional) Offline speech-to-text — private, free, no network
+```bash
+brew install whisper-cpp
+mkdir -p ~/.whisper-models
+# download a GGML model (e.g. ggml-large-v3-turbo.bin) into ~/.whisper-models/
+```
+If the model exists, the engine uses local Whisper automatically; otherwise it falls back to ElevenLabs Scribe. Force either with `COACH_STT=local` / `COACH_STT=scribe`.
 
-**可选（增强，不装也能跑）**
-7. **本机离线 STT（推荐：免云、免 key、更快）** —— `brew install whisper-cpp`，把模型 `ggml-large-v3-turbo.bin` 下到 `~/.whisper-models/`，`.env` 设 `COACH_STT=local`。不装则自动走 ElevenLabs Scribe（用上面那把 key）。
-8. **喊词唤醒「Claude」** —— `brew install portaudio` → `pip3 install -r requirements-wake.txt` → 录声纹 `python3 enroll_claude.py`（喊 4 遍 Claude，生成 `claude_ref.json`）→ `.env` 设 `COACH_WAKE=1`。不装则没有喊词唤醒（仍可双击/单击操作）。
-9. **垫播音（等待时的「嗯/让我想想」）** —— `node generate-acks.js` 生成（用 ElevenLabs key + ffmpeg；跟 `ELEVENLABS_VOICE_ID` 绑定）。不生成则等待时静默，无影响。
-10. **出站代理（墙内）** —— `.env` 的 `HTTPS_PROXY` 填 Clash/Verge 的 http 口。
+### 8. (Optional) Enable the "Claude" wake word — local, no key
+```bash
+brew install portaudio
+pip3 install -r requirements-wake.txt
+python3 enroll_claude.py        # say "Claude" 4 times → generates claude_ref.json
+# then set COACH_WAKE=1 in .env
+```
+Without it you can still operate the pet by clicking it.
 
-**起引擎**：`./start.sh`（或 `node coach-engine.js`）。
+### 9. (Optional) Pre-generate filler "thinking" sounds
+```bash
+node generate-acks.js           # uses your ElevenLabs key + ffmpeg
+```
+Without it, waits are simply silent.
 
-> 注意：仓库**不含** `.env`（key）、`claude_ref.json`/`claude_samples/`（你的声纹/录音）、`acks/`（生成的音频）——这些都按 `.gitignore` 排除，每台机器各自生成。
+### 10. Run it
+```bash
+cd claude-baby
+./start.sh
+```
+This launches the pet (`clawd-on-desk` with `CLAWD_COACH_MODE=1`) and the engine (`coach-engine.js`) in the background. Logs go to `/tmp/clawd-pet.log` and `/tmp/coach-engine.log`.
 
-## 桌宠引擎 `coach-engine.js`：通用助手 + 英语陪练（语音）
+### 11. Grant mic permission and talk
+On first run macOS asks for microphone permission — click **Allow**. Then **double-click the pet** (or shout "Claude" if you enabled the wake word) and start talking.
 
-桌宠那条链路（`./start.sh` 拉起的）不再只是英语陪练，而是一个**语音驱动的通用 Claude Code 助手**。两种模式：
+**Stop everything:**
+```bash
+pkill -f coach-engine.js
+pkill -9 -f "clawd-on-desk/node_modules/electron"
+```
 
-- **`agent`（默认）**——能解答各种问题、也**能真干活**：开全工具、自动批准（headless）、在工作目录里跑 bash / 读写文件 / 搜索 / 用 skills。完整答案（含代码、路径、命令）进**桌宠聊天栏**；TTS 只念**一句口语小结**（长答案自动剥掉代码/markdown，太长就念前两句 + “完整内容在聊天栏”）。干活时摆 `working` 打字动画，桌宠气泡里闪当前状态（`Claude is searching…` / `coding…` / `running commands…`），**不**往聊天栏灌工具历史。
-- **`coach`**——原来的英语陪练（关工具、强制 1–2 句、商务场景），`/coach`、`/coach alignment` 等进入。
+> Prefer two terminals instead of `start.sh`? Run `CLAWD_COACH_MODE=1 npm start` in `clawd-on-desk`, and `node coach-engine.js` in `claude-baby`.
 
-**切模型（对话里，斜杠或自然语言都行）**——默认 `haiku` 求快，随时切 `sonnet`/`opus`：
-- 斜杠：`/model opus`、`/model sonnet`、`/model haiku`（也认 `/opus`）
-- 自然语言：「用 opus」「切到 sonnet」「换成 haiku」「opus。」
-- 切模型用 `--resume` **保留上下文**（接着上一句继续聊，不重开）。
+---
 
-**切模式**：`/agent`、`/coach`；或说「英语陪练」「回到助手」。切模式会**重置上下文**（系统提示变了）。
+## Configuration reference (`.env`)
 
-**工作目录**：agent 默认在 `~/Desktop/同步` 里干活，改 `.env` 的 `COACH_WORKDIR`。
-**默认模式/模型**：`.env` 的 `COACH_MODE` / `COACH_MODEL`。
-**外部切换**：控制端口（默认 23390）也收 `POST /model {"model":"opus"}`、`POST /mode {"mode":"coach","scenario":"free"}`，可绑桌宠热键。
+Copy `.env.example` to `.env` and set what you need. Secrets and personal data never enter the repository (`.env`, your wake-word model, and generated audio are git-ignored).
 
-> 注意：agent 模式开了 `--permission-mode bypassPermissions`：它在工作目录里跑命令、改文件**不会逐个问你**。这是「能干活」的代价，工作目录别指向你不想被动的地方。订阅 OAuth（spawn 时删掉了 API key），不花 API credits。
+| Variable | Default | What it does |
+|---|---|---|
+| `ELEVENLABS_API_KEY` | — | **Required.** ElevenLabs key for TTS (and Scribe STT). |
+| `ELEVENLABS_VOICE_ID` | a public voice | Voice for TTS. Copy a Voice ID from your ElevenLabs Voices. |
+| `COACH_WORKDIR` | `~/Desktop/同步` | Directory the agent works in (runs commands, reads/writes files). **Set this to your own project directory.** |
+| `COACH_MODEL` | `haiku` | Startup model: `haiku`, `sonnet`, or `opus`. Switchable at runtime. |
+| `COACH_STT` | auto | `local` (whisper.cpp) or `scribe` (ElevenLabs). Auto-detects a local model if present. |
+| `COACH_WHISPER_MODEL` | `~/.whisper-models/ggml-large-v3-turbo.bin` | Path to the local Whisper model. |
+| `COACH_WHISPER_LANG` | `auto` | `auto`, `en`, `zh`, … |
+| `COACH_WAKE` | off | Set `1` to enable the "Claude" wake word (needs enrollment). |
+| `COACH_BARGE_VOICE` | on | Set `0` to disable speak-to-interrupt (clicking still interrupts). |
+| `COACH_BARGE_RMS` | `0.06` | Mic loudness to count as "you started talking". Raise if it interrupts itself on speaker echo; lower if it won't interrupt. |
+| `COACH_BARGE_SUSTAIN_MS` | `110` | How long your voice must sustain before interrupting. |
+| `COACH_VOICE_FX` | on | Telephone/walkie-talkie voice effect. `0` for a clean voice. |
+| `MIC_DEVICE` | `:1` | macOS `avfoundation` mic (index or device name). Use the device name if indices shift. |
+| `HTTPS_PROXY` | — | Outbound proxy for restricted networks. |
+| `COACH_CONTROL_PORT` | `23390` | Engine control HTTP port. |
 
-### 交互动效（桌宠）
+More fine-grained knobs (animation mappings, idle timeout, voice-FX filter, session directory) are documented in `.env.example` and the comments in `coach-engine.js`.
 
-- **点击打断**：它正用语音念回复时，**单击桌宠** → 冒一个「!」表情 → 立刻掐掉语音、把回合交给你（唤出聊天栏输入框，可以直接说/打字）。没在说话时点击不打扰它。
-  - 实现：桌宠单击 → IPC `coach-poke` → 引擎 `POST /poke`，引擎只在「正在说话」时执行 barge-in（见 `coach-engine.js` 的 `doBarge`、`clawd-on-desk` 的 `hit-renderer.js`/`pet-interaction-ipc.js`/`preload-hit.js`）。
-- **work 动画 + 状态闪烁**：agent **调用工具时**摆出 `working` 打字动画，桌宠气泡里闪一句当前在干嘛——`Claude is searching…` / `Claude is coding…` / `Claude is running commands…` / `Claude is browsing the web…` …（**不**把工具历史灌进聊天栏，只闪状态，很 code 味儿）。**切模型/切模式**时也先摆 `working` 动画。
-- **更多状态**：开场/欢迎用 `attention`（开心）；出错/超时用 `error`；打断瞬间用 `notification`（「!」）；倾听看着你、说话单跳——状态齐全。可用 `COACH_STATE_*` / `COACH_ALERT_ANIM` 环境变量改映射。
-- **声音电话失真**：每段语音过一层 ffmpeg「电话/对讲机」效果（带通 350–3400Hz + 轻 bitcrush + 过载）。默认开，`COACH_VOICE_FX=0` 关、`COACH_VOICE_FX_FILTER` 自定义。需要本机有 `ffmpeg`。
+---
 
-### 手势 / 会话
+## Usage
 
-**双击桌宠**：
-- 会话没开 → 起会话（开语音 + 显示对话）。
-- 会话开着 → **只隐藏/显示对话面板**，语音不停、麦还在听、它仍能说话；再显示时输入框还在、不重刷记录。
-- 真正结束 → **右键菜单 →「结束会话（停语音）」**。
+- **Start a session** — double-click the pet (or shout "Claude" if the wake word is on). It pops out and starts listening.
+- **Just talk** — pause for about a second and it treats you as finished, then works and replies.
+- **Interrupt it** — start speaking while it talks, or click the pet. It stops immediately and the turn is yours.
+- **Switch models** — say "switch to opus" / "use sonnet" / "go back to haiku", type `/model opus`, or `POST /model {"model":"opus"}` to the control port.
+- **Sessions** — saved to `~/.coach-sessions/`. Hide/show the chat or restart the engine and it resumes the last conversation. The pet's right-click menu offers New / Switch / End.
+- **Hide vs end** — double-clicking again just hides the chat panel (voice keeps running); use the menu's "End" to fully stop.
 
-**会话记录持久**（落盘 `~/.coach-sessions/<id>.json`，标题取首句、记 mode/model/对话；`COACH_SESSION_DIR` 改目录）：
-- 隐藏对话再显示、`./start.sh` 重启引擎，都能看回上次记录（重启时自动 `--resume` 最近会话接上上下文）。
-- **右键菜单**（coach 模式才显示）：**新建会话**（全新上下文 + 清空）/ **切换会话**（子菜单列最近会话，当前的打勾，点一下 `--resume` 切过去并恢复它的记录与 mode/model）/ **结束会话**。
-- 实现：菜单/手势 → 引擎 `POST /session/new` `/session/switch` `/sessions` `/stop` `/toggle-session`（见 `coach-engine.js` 会话存储段、`clawd-on-desk/src/menu.js`）。
+**Control port (for hotkeys/automation), default `127.0.0.1:23390`:**
+```bash
+curl -X POST 127.0.0.1:23390/model -H 'content-type: application/json' -d '{"model":"opus"}'
+curl -X POST 127.0.0.1:23390/poke    # interrupt (same as clicking the pet)
+```
 
-## 常见问题 / FAQ
+---
 
-### Claude Baby 是什么？
-Claude Baby 是一个语音驱动的桌面宠物 Claude 助手：桌面上的像素宠物是「身体」，本仓库的 `coach-engine.js` 是「大脑」。你对它说话，它用 Claude 做 agent 干活（读写文件、跑命令、搜索 web），再用 ElevenLabs 合成语音回你，并能在听到「Claude」时跳出来。目标是「比直接敲 Claude Code 更便捷」——动口不动手。英语陪练只是其中一个可切的次要模式。
+## Voice pipeline (STT / TTS / wake word)
 
-### 它会消耗我的 Anthropic API 额度吗？
-不会。引擎 spawn 你本机已登录的 `claude` CLI，并在 spawn 时**特意删掉子进程里的 `ANTHROPIC_API_KEY`**，强制它走你的 Claude 订阅 OAuth。所以它吃的是订阅（你平时用的那个），不花 API credits。只有语音（ElevenLabs STT/TTS）按 ElevenLabs 自己的额度计费。
+- **Speech-to-text** — local `whisper.cpp` server (offline, free, private) when a model is installed; otherwise ElevenLabs Scribe. The engine keeps a persistent whisper-server so the model loads only once.
+- **Text-to-speech** — ElevenLabs Flash (`eleven_flash_v2_5`), streamed and played with `afplay`. An optional `ffmpeg` filter adds a telephone/walkie-talkie character; disable with `COACH_VOICE_FX=0`.
+- **Wake word** — optional, fully local few-shot detection (EfficientWord-Net) for "Claude"; you enroll your own voice with `enroll_claude.py`. Used for waking the pet, not for interrupting (interruption is loudness-based).
 
-### 怎么打断它说话？
-两种方式：它正用语音念回复时**你直接开口说话**，引擎监听主麦音量、你一出声就立刻掐掉它的语音并把回合交给你；或者**单击桌宠**强制打断。打断判据是音量而非喊词，所以长篇回复也能可靠打断。门槛可用 `COACH_BARGE_RMS` / `COACH_BARGE_SUSTAIN_MS` 调。
+**Headphones vs speakers.** Headphones are best — no acoustic echo, so listening and barge-in are flawless. On speakers, the engine filters out its own voice with a loudness gate and a transcription "hallucination" filter; tune `COACH_BARGE_RMS` if it ever interrupts itself.
 
-### 支持 Windows / Linux 吗？
-目前面向 **macOS**：抓麦克风用 ffmpeg 的 `avfoundation`、播放用 `afplay`、喊词唤醒依赖 PortAudio。移植到其他平台需替换音频采集与播放后端。其余逻辑（Node 引擎、Claude CLI、ElevenLabs）跨平台。
+---
 
-### 和 clawd-on-desk 是什么关系？
-clawd-on-desk 是开源的 Electron 桌面宠物（AGPL-3.0），提供像素宠物的显示与动画——即「身体」。本仓库是「大脑」，通过本地端口与它对接（引擎 → 桌宠 `POST /say`，桌宠 → 引擎控制端口）。两者配合才完整；本仓库同样采用 AGPL-3.0。
+## Troubleshooting
 
-### 不联网 / 在墙内能用吗？
-大脑（`claude` CLI）走你本机的网络与代理。语音里 ElevenLabs 在墙外，墙内需在 `.env` 配 `HTTPS_PROXY`。若把 STT 设为本机 whisper.cpp（`COACH_STT=local`），转写完全离线、不出网。
+| Symptom | Likely cause / fix |
+|---|---|
+| Replies are always an error message | The brain hit an error — check `/tmp/coach-engine.log`. Common causes: Claude usage limit reached (switch to a cheaper model or wait for reset), a lost/too-long session (now self-heals by starting a new one), or `claude` not logged in. |
+| It interrupts itself while speaking | Speaker echo crosses the loudness gate. Raise `COACH_BARGE_RMS` (e.g. `0.1`), or use headphones. |
+| It won't interrupt when you talk | Lower `COACH_BARGE_RMS` (e.g. `0.04`) or `COACH_BARGE_SUSTAIN_MS`. |
+| Random chat bubbles appear when silent | STT hallucinating on near-silence — already filtered; raise `COACH_MIN_VOICED_BYTES` if needed. |
+| No microphone / no audio | Grant mic permission to your terminal; check `MIC_DEVICE` (use the device name, not an index). |
+| ElevenLabs requests fail | Verify `ELEVENLABS_API_KEY`; set `HTTPS_PROXY` if your network blocks it. |
+| The pet doesn't appear / no speech | Make sure `clawd-on-desk` is running with `CLAWD_COACH_MODE=1`; check `/tmp/clawd-pet.log`. |
 
-## 后续可加
+---
 
-- logo + 入场动画（页面左上角已留 `LOGO` 槽位）
-- GSAP 替换现在的 Web Animations 文字编排（ui-skills/gsap）
-- STT 转本地（外放抗回声终极方案）
+## FAQ
+
+### What is Claude Baby?
+Claude Baby is a voice-driven desktop-pet agent built on Claude Code. A pixel pet on your desktop is the face; a Node engine (`coach-engine.js`) is the brain. You speak to it, it uses Claude Code to do real work (read/edit files, run commands, search the web, use skills), and it answers in a synthesized voice. It is a more convenient, hands-free way to use Claude Code.
+
+### Does it use my Anthropic API credits?
+No. It spawns your locally installed, logged-in `claude` CLI and removes `ANTHROPIC_API_KEY` from the child process, which forces it to use your Claude **subscription** (OAuth). Only the voice layer (ElevenLabs STT/TTS) bills against your ElevenLabs quota.
+
+### How do I interrupt it while it's talking?
+Just start speaking, or click the pet. Interruption is based on your microphone loudness, not a keyword, so it works reliably even during long answers. Tune it with `COACH_BARGE_RMS` and `COACH_BARGE_SUSTAIN_MS`.
+
+### Does it run on Windows or Linux?
+Today it targets macOS, because it captures the microphone with ffmpeg's `avfoundation`, plays audio with `afplay`, and uses PortAudio for the wake word. The Node engine, Claude CLI, and ElevenLabs are cross-platform, so a port mainly requires replacing the audio backends.
+
+### Do I need to be online?
+The brain (`claude` CLI) uses your machine's network. ElevenLabs is a cloud service; set `HTTPS_PROXY` if your network restricts it. With local `whisper.cpp`, transcription runs fully offline.
+
+### What is the relationship to clawd-on-desk?
+[clawd-on-desk](https://github.com/XiaoChu-1208/clawd-on-desk) is the open-source Electron desktop pet (AGPL-3.0) that provides the visible body and animations. Claude Baby is the brain; the two talk over local HTTP. You need both. This repository is also AGPL-3.0.
+
+---
+
+## Privacy & data
+
+- API keys live only in `.env`, which is git-ignored and never committed.
+- Your wake-word model (`claude_ref.json`) and raw enrollment recordings (`claude_samples/`) stay on your machine — git-ignored.
+- With local Whisper (`COACH_STT=local`), speech is transcribed on-device and never leaves your computer. With ElevenLabs Scribe, audio is sent to ElevenLabs for transcription.
+- Conversations are stored locally in `~/.coach-sessions/`.
+
+---
+
+## License
+
+[AGPL-3.0-only](LICENSE). This project integrates with [clawd-on-desk](https://github.com/XiaoChu-1208/clawd-on-desk), which is also AGPL-3.0-only.
+
+## Acknowledgements
+
+- **[Clawd on Desk](https://github.com/rullerzhou-afk/clawd-on-desk) by [@rullerzhou-afk](https://github.com/rullerzhou-afk)** — the desktop pet this project is built on. Thank you.
+- [Anthropic Claude Code](https://docs.claude.com) — the agent brain.
+- [ElevenLabs](https://elevenlabs.io) — speech-to-text and text-to-speech.
+- [EfficientWord-Net](https://github.com/Ant-Brain/EfficientWord-Net) — local wake-word detection.
+- [whisper.cpp](https://github.com/ggerganov/whisper.cpp) — offline speech-to-text.

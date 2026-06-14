@@ -465,6 +465,16 @@ function petSound(name) {
   req.write(body); req.end();
 }
 
+// 设置页操作 → 桌宠"收到"反应(开心点一下;防抖,不打断说话/不改状态,只叠一层短动画)
+let _lastAck = 0;
+function petAck() {
+  if (speaking) return;
+  const now = Date.now();
+  if (now - _lastAck < 500) return;   // 连续拖滑块不狂跳
+  _lastAck = now;
+  sayPet('', null, 'clawd-happy.svg', 900);
+}
+
 // ───────────────────────── Claude 自驱桌宠（改尺寸 / 进出 mini / 表演动画）─────────────────────────
 // 驱动桌宠身体：{size:'S'|'M'|'L'} 变大变小、{mini:true|false} 缩到角落/回来。桌宠端 /say 收 control 分支。
 function petControl(ctrl) {
@@ -1357,6 +1367,7 @@ function applyMic(device) {
   if (knockMic) { stopKnockListener(); startKnockListener(); }
   console.log('  [mic] 切到设备', MIC);
   saveRuntimeConfig();
+  petAck();
   return true;
 }
 // 按 id 重命名任意会话:当前会话走 renameSession;其它会话直接改盘上 json。
@@ -1445,6 +1456,7 @@ function applyConfig(c) {
   if ('musicApp' in c) { MUSIC_APP = String(c.musicApp || '').trim(); startMusicWatch(); }
   console.log('  [config] 更新', JSON.stringify(c));
   saveRuntimeConfig();   // 落盘 → 重启自动恢复
+  petAck();              // 设置生效 → 桌宠反应一下
   return getConfig();
 }
 
@@ -1556,6 +1568,7 @@ const controlServer = http.createServer((req, res) => {
     req.on('end', () => {
       let j = {}; try { j = JSON.parse(b || '{}'); } catch (_) {}
       const okk = req.url === '/session/rename' ? renameSessionById(j.id, j.title) : deleteSessionById(j.id);
+      petAck();
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ ok: !!okk, current: currentSessionId, sessions: listSessions(50) }));
     });

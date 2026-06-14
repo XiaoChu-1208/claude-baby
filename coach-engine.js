@@ -203,6 +203,7 @@ function brainErrMsg(raw) {
     return '这次想太久超时了，再说一次试试？';
   return currentMode === 'agent' ? 'Sorry, something went wrong or timed out.' : '';
 }
+let pendingImage = null;   // {media_type,data} 下一次 ask 作为图片块附上(聊天栏粘贴的剪贴板图片);用后清空
 function ask(text) {
   return new Promise((resolve, reject) => {
     if (!brainProc) return reject(new Error('brain not started'));
@@ -215,7 +216,15 @@ function ask(text) {
       try { startBrain(currentMode, currentScenario, currentModel, currentSessionId || undefined); } catch (_) {}
       if (p) p.reject(new Error('claude 超时'));
     }, ms) };
-    brainProc.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: text } }) + '\n');
+    // 有粘贴的图片 → 用内容块数组(文本块 + 图片块);否则普通字符串。
+    let content = text;
+    if (pendingImage) {
+      content = [];
+      if (text) content.push({ type: 'text', text });
+      content.push({ type: 'image', source: { type: 'base64', media_type: pendingImage.media_type, data: pendingImage.data } });
+      pendingImage = null;
+    }
+    brainProc.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n');
   });
 }
 
@@ -709,23 +718,32 @@ function switchMode(mode, scenario) {
 }
 
 async function handleUtterance(text, oneShot) {
+  const hasImg = !!pendingImage;                  // 这一轮带粘贴的图片(纯图也放行)
+  text = text || '';
   // 隐藏/说话中 → 一律不处理。语音(oneShot)在暂停时不处理；打字即便暂停也允许发。
-  if (!sessionActive || !text || text.trim().length <= 1 || speaking || panelHidden) return;
+  if (!sessionActive || speaking || panelHidden) return;
+  if (!hasImg && text.trim().length <= 1) return;
   if (oneShot && paused) return;
+  const trimmed = text.trim();
+  // 斜杠命令:/clear|/reset|/new → 本地清空开新会话(等价 Claude Code 的 /clear)。其它 /命令(/compact 等)透传给大脑。
+  if (!hasImg && (trimmed === '/clear' || trimmed === '/reset' || trimmed === '/new')) { console.log('  [cmd] /clear → 新会话'); newSession(); return; }
   speaking = true; forwarding = false;            // 半双工：先闭麦再开口
   turnAborted = false;                            // 新一轮开始 → 清掉上一轮的打断标记
   toolUsedThisTurn = false;
-  const mine = text.trim();
+  const mine = trimmed;
+  const isSlash = !hasImg && mine.startsWith('/');   // 透传给大脑的 Claude Code 斜杠命令(/compact 等)
   try {
-    // oneShot(语音一次性转写)→ 气泡放大展开+文字渐显；打字/流式 → 直接顶上去
-    chat({ type: 'add', role: 'user', text: mine, anim: oneShot ? 'grow' : null });
-    console.log(`\n  你: ${mine}`);
+    // oneShot(语音一次性转写)→ 气泡放大展开+文字渐显；打字/流式 → 直接顶上去。
+    // 斜杠命令 → 气泡走 'cmd' 黑色变体；粘贴的图片 → 带 image 让气泡里方形预览。
+    const imgUrl = (hasImg && pendingImage) ? `data:${pendingImage.media_type};base64,${pendingImage.data}` : null;
+    chat({ type: 'add', role: 'user', text: mine, anim: oneShot ? 'grow' : null, variant: isSlash ? 'cmd' : undefined, image: imgUrl || undefined });
+    console.log(`\n  你: ${mine}${hasImg ? ' [+image]' : ''}`);
 
-    // 先拦控制指令（切模型/模式/重命名），不喂给大脑
-    const cmd = parseCommand(mine);
+    // 先拦控制指令（切模型/模式/重命名/音量/桌宠），不喂给大脑。带图片 → 不拦,直接走大脑当对话。
+    const cmd = hasImg ? null : parseCommand(mine);
     if (cmd) {
-      if (cmd.kind !== 'pet') sayPet('', ST_WORK);   // 控制指令先摆 work；pet 命令【不要】这一发——
-                                                     // 它会和紧接着的动画抢，甚至把动画盖掉（setState 会取消叠加动画）
+      if (cmd.kind !== 'pet') sayPet('', ST_WORK, isSlash ? 'clawd-working-typing.svg' : null, isSlash ? 600000 : undefined);   // 命令处理→work;斜杠命令用 coding 打字动画
+                                                     // pet 命令【不要】这一发——它会和紧接着的动画抢，甚至把动画盖掉（setState 会取消叠加动画）
       let ack = '', petAnim = null;
       try {
         if (cmd.kind === 'model') ack = switchModel(cmd.model);
@@ -750,10 +768,10 @@ async function handleUtterance(text, oneShot) {
         else ack = switchMode(cmd.mode, cmd.scenario);
       } catch (e) { ack = '切换失败：' + e.message; }
       if (!sessionActive || panelHidden || turnAborted) return;
-      if (ack) chat({ type: 'add', role: 'coach', text: ack });
-      sayPet('', ST_IDLE, petAnim || SPEAK_ANIM, petAnim ? ANIM_MS : SPEAK_MS);
+      if (ack) chat({ type: 'add', role: 'coach', text: ack, variant: isSlash ? 'cmd' : undefined });
+      sayPet('', ST_IDLE, petAnim || (isSlash ? 'clawd-working-typing.svg' : SPEAK_ANIM), petAnim ? ANIM_MS : SPEAK_MS);
       const animAt = Date.now();
-      if (ack) await speakTTS(ack);
+      if (ack && !isSlash) await speakTTS(ack);   // 斜杠命令:处理时不出声
       // 一次性动画必须真正露出来：这轮 return 后 finally 的 resumeListen 会【立刻】把它切回倾听动画
       // （renderer 里 setState 会 cancelReaction 掉叠加动画）。所以兜一个最短停留——
       // 哪怕 ack 很短 / TTS 秒回 / 没声音，也先让动画播够再交回去。
@@ -764,11 +782,11 @@ async function handleUtterance(text, oneShot) {
       return;
     }
 
-    recordTurn('user', mine);                       // 进会话记录（命令切换不记）
+    recordTurn('user', mine || '[image]');           // 进会话记录（命令切换不记）
     lastTyped = !oneShot;                            // 记住这轮是打字还是语音 → 决定下轮默认模式
     // 思考：opus 用「超级思考」动画，sonnet/haiku 用普通思考
-    sayPet('', ST_THINK, currentModel === 'opus' ? 'clawd-working-ultrathink.svg' : null, currentModel === 'opus' ? 600000 : undefined);
-    playAck(ACK_LONG);   // 思考时:垫一条长"思考"音(let me think…),真回复来了 speakTTS 会掐掉
+    if (isSlash) sayPet('', ST_WORK, 'clawd-working-typing.svg', 600000);   // 斜杠命令:coding 动画,不垫思考音、不出声
+    else { sayPet('', ST_THINK, currentModel === 'opus' ? 'clawd-working-ultrathink.svg' : null, currentModel === 'opus' ? 600000 : undefined); playAck(ACK_LONG); }
     let reply = '', errored = false;
     try { reply = await ask(mine); }
     catch (e) {
@@ -786,16 +804,19 @@ async function handleUtterance(text, oneShot) {
     // Claude 自驱桌宠:回复里带 [[volume]] / [[size]] / [[mini]] / [[anim]] 等标记
     // → 应用对应动作并从文本里抠掉(不显示/不朗读)。可能整段都是标记 → reply 变空、只剩动作。
     if (reply) reply = applyPetMarkers(reply);
+    // Claude Code 斜杠命令(/compact 等)常返回空 → 给个明确回执,别让用户以为没反应。
+    if (!reply && isSlash && !errored) reply = (mine === '/compact' ? 'Compacted the conversation.' : 'Done.');
     if (reply) {
       console.log(`  Coach: ${reply}`);
       if (!errored) recordTurn('coach', reply);        // 成功回复进会话记录
-      chat({ type: 'add', role: 'coach', text: reply }); // 完整答案（含代码/路径）进聊天记录
+      chat({ type: 'add', role: 'coach', text: reply, variant: isSlash ? 'cmd' : undefined }); // 完整答案进聊天记录;斜杠命令走黑色变体
       const spoken = spokenFrom(reply);                  // agent 模式只念精简口语小结
-      // 出错→晕；干完活(用过工具)→开心一下；普通回复→说话单跳
-      if (errored) sayPet('', ST_ERR, 'clawd-dizzy.svg', SPEAK_MS);
+      // 斜杠命令:不出声、coding 收尾;否则 出错→晕 / 干完活→开心 / 普通→说话单跳
+      if (isSlash) sayPet('', ST_IDLE, 'clawd-working-typing.svg', 1200);
+      else if (errored) sayPet('', ST_ERR, 'clawd-dizzy.svg', SPEAK_MS);
       else if (toolUsedThisTurn) sayPet('', ST_HAPPY, 'clawd-happy.svg', 1600);
       else sayPet('', ST_IDLE, SPEAK_ANIM, SPEAK_MS);
-      if (spoken) await speakTTS(spoken);
+      if (spoken && !isSlash) await speakTTS(spoken);   // 斜杠命令:不发语音
     }
   } finally {
     // 无论正常/出错：保证 speaking 复位、（没隐藏则）恢复你的回合输入框（暂停时也给灰输入框）
@@ -1092,6 +1113,8 @@ let BARGE_VOICE = process.env.COACH_BARGE_VOICE !== '0';
 // 你说话超过这个门槛、且连续 BARGE_SUSTAIN_MS 毫秒 → 打断。外放回声会垫高底噪:自打断就调高门槛,打不断就调低。
 let BARGE_RMS = Number(process.env.COACH_BARGE_RMS || 0.06);
 let BARGE_SUSTAIN_MS = Number(process.env.COACH_BARGE_SUSTAIN_MS || 110);
+// 它"干活/思考中"(还在跑工具、没开口念回复)时打断要更难:持续说话门槛 ×这个倍数,且触发=真 ESC 中断(停掉 agent 的活)。
+const BARGE_WORK_MULT = Number(process.env.COACH_BARGE_WORK_MULT || 2);
 // 喊词唤醒开关 + 命中阈值(设置页可调;阈值改后重拉边车生效)。
 let WAKE_ENABLED = process.env.COACH_WAKE === '1';
 let WAKE_THRESHOLD = Number(process.env.COACH_WAKE_THRESHOLD || 0.65);
@@ -1099,16 +1122,32 @@ let WAKE_THRESHOLD = Number(process.env.COACH_WAKE_THRESHOLD || 0.65);
 let lastWakeAt = 0;
 const WAKE_COOLDOWN_MS = Number(process.env.COACH_WAKE_COOLDOWN_MS || 1500);
 let _bargeBytes = 0;   // 连续超过门槛的累计字节(16k 单声道 s16le:每毫秒 32 字节);中断即清零,必须"持续"才算你真在说
-function bargeWatch(chunk) {   // 在它说话期间被主麦数据回调调用
+function bargeWatch(chunk) {   // 在它说话/干活期间被主麦数据回调调用
   if (!BARGE_VOICE || !speaking) return;
+  const working = pending != null;                         // 还在等大脑(跑工具/思考)= 干活;否则 = 正在念回复(TTS)
+  const need = BARGE_SUSTAIN_MS * (working ? BARGE_WORK_MULT : 1);   // 干活时要持续更久才打断,防误中断
   if (pcmRms(chunk) >= BARGE_RMS) {
     _bargeBytes += chunk.length;
-    if (_bargeBytes >= BARGE_SUSTAIN_MS * 32) {
+    if (_bargeBytes >= need * 32) {
       _bargeBytes = 0;
-      console.log('[barge] 说话中你开口了 → 打断,轮到你说');
-      doBarge();   // 掐掉 TTS/思考 → speakTTS resolve → handleUtterance finally → resumeListen 顶出你的录音气泡
+      if (working) { console.log('[barge] 干活中你持续说话 → 真 ESC 中断 agent'); interruptBrain(); }
+      else { console.log('[barge] 说话中你开口了 → 打断,轮到你说'); doBarge(); }
     }
   } else { _bargeBytes = 0; }
+}
+// 真打断(等价 Claude Code 里按 ESC):给常驻 claude 发 stream-json 控制请求 interrupt,停掉它当前那一轮的活;
+// 同时本地按打断收尾(惊吓动画 + 立刻把回合还给你)。半截工具流由 CLI 自己停,之后大脑仍可接着用。
+function interruptBrain() {
+  turnAborted = true; ttsAborted = true; _bargeBytes = 0;
+  if (currentAfplay) { try { currentAfplay.kill('SIGKILL'); } catch (_) {} }   // 掐掉正在播的垫播音
+  try {
+    if (brainProc && brainProc.stdin && brainProc.stdin.writable) {
+      brainProc.stdin.write(JSON.stringify({ type: 'control_request', request_id: 'int_' + Date.now(), request: { subtype: 'interrupt' } }) + '\n');
+    }
+  } catch (_) {}
+  sayPet('', ST_IDLE, ALERT_ANIM, 900);   // 大感叹号惊吓(同点击打断)
+  if (pending) { const p = pending; pending = null; clearTimeout(p.timer); try { p.resolve(''); } catch (_) {} }  // 别再等结果,马上把麦还给你
+  console.log('  [barge] 干活中断(ESC)→ 轮到你说');
 }
 function startIdleWake() { if (getVoiceWake().start()) return; startKnockListener(); }  // 唤醒词没开(false)→ 敲两下
 function stopIdleWake() { if (!WAKE_BARGE) getVoiceWake().stop(); stopKnockListener(); }  // 开打断 → 不停语音边车,会话期间也听着
@@ -1271,11 +1310,16 @@ const controlServer = http.createServer((req, res) => {
     listMics().then((mics) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: true, mics, current: MIC })); });
     return;
   }
-  if (req.method === 'POST' && req.url === '/text') {           // 打字输入（聊天栏回车）
-    let b = ''; req.on('data', (c) => { b += c; if (b.length > 8192) req.destroy(); });
+  if (req.method === 'POST' && req.url === '/text') {           // 打字输入（聊天栏回车）+ 可选粘贴的图片
+    let b = ''; req.on('data', (c) => { b += c; if (b.length > 12_000_000) req.destroy(); });   // 放大上限:图片 base64 可能几 MB
     req.on('end', () => {
-      let t = ''; try { t = JSON.parse(b || '{}').text || ''; } catch (_) {}
-      if (t) { bumpIdle(); handleUtterance(String(t)); }   // 打字 = 有操作，重置闲置计时
+      let t = '', img = '';
+      try { const j = JSON.parse(b || '{}'); t = j.text || ''; img = j.image || ''; } catch (_) {}
+      if (img) {   // data URL: data:image/png;base64,xxxx
+        const m = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i.exec(img);
+        if (m) pendingImage = { media_type: m[1], data: m[2] };
+      }
+      if (t || pendingImage) { bumpIdle(); handleUtterance(String(t)); }   // 打字/图片 = 有操作，重置闲置计时
       res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}');
     });
     return;

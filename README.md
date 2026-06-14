@@ -173,7 +173,15 @@ cd claude-baby
 
 `setup.sh` installs Node/ffmpeg (via Homebrew), the Node deps, the Claude Code CLI, and — if you say yes — local Whisper + model, the wake-word stack, filler audio, and the `clawd-on-desk` pet. It is safe to re-run. The only two things it can't do for you: **sign in to Claude** (`claude`) and **paste your ElevenLabs key** into `.env`.
 
-You can also just hand the manual steps below to Claude Code itself and let it install everything.
+### Even faster: let Claude Code install it for you
+
+If you already have the `claude` CLI (you need it anyway — it's the brain), you can hand the whole install to it with **one command**. It reads the runbook at [`INSTALL.md`](INSTALL.md), clones the repos, runs `setup.sh`, and pauses only for your ElevenLabs key:
+
+```bash
+claude --dangerously-skip-permissions "Install Claude Baby on this Mac by following https://raw.githubusercontent.com/XiaoChu-1208/claude-baby/main/INSTALL.md — do every step you can, and pause to ask me only for the things I alone can provide (my ElevenLabs API key)."
+```
+
+`--dangerously-skip-permissions` lets it run `brew`/`git`/`npm` without stopping to confirm each one. Prefer to approve every step yourself? Drop that flag and run the same command — Claude Code will ask before each action.
 
 Prefer to do it by hand? The full breakdown follows. **Steps 1–6 are required; 7–9 are optional.**
 

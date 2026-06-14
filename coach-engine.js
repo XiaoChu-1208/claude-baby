@@ -93,7 +93,8 @@ Behaviour:
     • [[anim:NAME]] perform a quick one-off animation. NAME can be: happy, dizzy, wave, alert, yawn, look, think, dance, juggle (or a raw clawd-*.svg filename).
   DANCE / PERFORM / TRICK / ACROBATICS → use an animation ([[anim:dance]] or [[anim:juggle]]), NEVER [[size:L]]. Performing is an animation, not growing bigger.
   Use these expressively when it fits — e.g. a wave when greeting, [[anim:happy]] when a task succeeds, [[mini]] when the user says "get out of the way" / "go to the corner" / "shrink", [[unmini]] when they call you back. A reply can be ONLY markers (no text) if you just want to perform an action silently. Don't overuse them on every turn; match the user's intent.
-  IMPORTANT: these double-bracket markers are the ONE exception to the "no symbols" rule above — when you decide to use one, emit it LITERALLY as written (e.g. [[anim:happy]]); the host removes it so it is never spoken or shown. NEVER instead say things like "I'm not sure how to do that" or ask the user how to resize/minimize/animate — you CAN do all of this yourself with these markers, so just do it. (Common explicit requests like "make yourself bigger", "go mini", "表演一个开心", "缩到角落" are also handled by the host before you even see them, so you usually only need the markers for expressive or contextual moments.)`;
+  IMPORTANT: these double-bracket markers are the ONE exception to the "no symbols" rule above — when you decide to use one, emit it LITERALLY as written (e.g. [[anim:happy]]); the host removes it so it is never spoken or shown. NEVER instead say things like "I'm not sure how to do that" or ask the user how to resize/minimize/animate — you CAN do all of this yourself with these markers, so just do it. (Common explicit requests like "make yourself bigger", "go mini", "表演一个开心", "缩到角落" are also handled by the host before you even see them, so you usually only need the markers for expressive or contextual moments.)
+- MEMORY (you remember the user across sessions): a block titled "About the user" may appear above with their name and durable facts — use it naturally, address them by name now and then, and never recite the list back. When the user tells you something durable and worth keeping for next time (a lasting preference, an important fact about them, how they like you to work), save it by putting a marker [[remember: the fact as one short plain sentence]] anywhere in your reply; to drop something, [[forget: short description]]. The host stores it to a profile and strips the marker, so it is never spoken or shown. Keep remembered text plain and voice-friendly (no emoji, no symbols). Explicit user commands like "记住…", "remember…", "我叫…", "my name is…", "忘掉…", "清空记忆" are already handled by the host before you ever see them, so you usually only need this marker for things you proactively notice are worth keeping. NEVER claim you cannot remember things across sessions — you can.`;
 
 // ───────────────────────── 常驻 claude（吃订阅，记上下文）─────────────────────────
 // agent 模式：开全工具 + bypass 权限 + cwd=WORKDIR，能真干活；用 --append-system-prompt 保留
@@ -123,8 +124,10 @@ function startBrain(mode, scenario, model, resumeId) {
   if (mode === 'agent') {
     // 动态告诉它当前是哪个模型 —— 切换(resume)后它才知道自己已是 sonnet/opus，
     // 被问「切了吗/你是什么模型」时能正面确认，而不是否认 + 扯 /config。
+    const memoryBlock = buildMemoryBlock();   // 跨会话记忆（名字 + 持久事实）；空档案返回 '' → 不改变默认行为
     const sys = AGENT_ADDENDUM +
-      `\n\nYou are currently running as the "${mdl}" model. If the user asks which model you are, or whether a model switch happened or worked, simply confirm you are ${mdl}. NEVER deny that you were switched, never claim you can't change models, never mention /config or /fast.`;
+      `\n\nYou are currently running as the "${mdl}" model. If the user asks which model you are, or whether a model switch happened or worked, simply confirm you are ${mdl}. NEVER deny that you were switched, never claim you can't change models, never mention /config or /fast.` +
+      (memoryBlock ? `\n\n${memoryBlock}` : '');
     args.push('--permission-mode', 'bypassPermissions',   // headless 自动批准工具
       '--append-system-prompt', sys);                      // 不替换：保留 Claude Code 干活大脑 + 注入当前模型身份
     opts.cwd = WORKDIR;                                    // 在工作目录里干活
@@ -272,6 +275,70 @@ function listSessions(limit = 15) {
   return out.slice(0, limit);
 }
 const loadSessionData = (id) => { try { return JSON.parse(readFileSync(sessFile(id), 'utf8')); } catch (_) { return null; } };
+
+// ───────────────────────── 用户记忆档案（跨会话「认得你」）─────────────────────────
+// 跟会话记录分开：这是「关于你这个人」的长期档案（名字 + 持久偏好/事实），所有会话共用、
+// 引擎重启也在。每次 startBrain 都从磁盘重读、拼进系统提示，所以改了档案下次(重)启大脑就生效。
+const MEM_DIR = process.env.COACH_PROFILE_DIR || join(homedir(), '.claude-baby');
+const MEM_FILE = join(MEM_DIR, 'profile.json');
+const MEM_MAX = 40;          // 最多记 40 条，超了丢最旧的，免得系统提示无限膨胀
+const MEM_FACT_MAX = 200;    // 单条事实最长 200 字
+try { if (!existsSync(MEM_DIR)) mkdirSync(MEM_DIR, { recursive: true }); } catch (_) {}
+function loadProfile() {
+  try { const j = JSON.parse(readFileSync(MEM_FILE, 'utf8')); return { name: j.name || '', address: j.address || '', facts: Array.isArray(j.facts) ? j.facts : [] }; }
+  catch (_) { return { name: '', address: '', facts: [] }; }
+}
+function saveProfile(p) { try { writeFileSync(MEM_FILE, JSON.stringify(p)); } catch (_) {} }
+// 记一条事实（去重 + 截断 + 限量）。返回存下来的文本（用于回执）；空/已有近似 → 不重复存。
+function addMemory(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim().slice(0, MEM_FACT_MAX);
+  if (!t) return '';
+  const p = loadProfile();
+  const norm = normHall(t);
+  if (norm && p.facts.some((f) => { const fn = normHall(f.text); return fn === norm || fn.includes(norm) || norm.includes(fn); })) return t;
+  p.facts.push({ id: randomUUID(), text: t, addedAt: Date.now() });
+  if (p.facts.length > MEM_MAX) p.facts = p.facts.slice(-MEM_MAX);
+  saveProfile(p);
+  return t;
+}
+// 设名字（同时作为默认称呼）。返回存下来的名字。
+function setName(name) {
+  const n = String(name || '').replace(/\s+/g, ' ').trim().slice(0, 24);
+  if (!n) return '';
+  const p = loadProfile(); p.name = n; if (!p.address) p.address = n; saveProfile(p);
+  return n;
+}
+// 删记忆：query 命中（id 或模糊互相包含）就删。返回删掉的条数。
+function forgetMemory(query) {
+  const q = normHall(query);
+  if (!q) return 0;
+  const p = loadProfile();
+  const before = p.facts.length;
+  p.facts = p.facts.filter((f) => !(f.id === query || normHall(f.text).includes(q) || q.includes(normHall(f.text))));
+  const removed = before - p.facts.length;
+  if (removed) saveProfile(p);
+  return removed;
+}
+// 清空记忆。wipeName=true（「忘记我」）连名字一起清；否则只清事实、留名字。
+function clearMemory(wipeName) {
+  const p = loadProfile();
+  saveProfile({ name: wipeName ? '' : p.name, address: wipeName ? '' : p.address, facts: [] });
+  return true;
+}
+// 组装注入系统提示的记忆块；空档案 → 返回 ''（保持默认行为，绝不瞎编名字）。
+function buildMemoryBlock() {
+  const p = loadProfile();
+  if (!p.name && !p.facts.length) return '';
+  const lines = ['About the user (persistent memory across all sessions; use it naturally, do not recite it back):'];
+  if (p.name) lines.push(`- The user's name is ${p.name}. Address them as ${p.address || p.name} now and then when it feels natural, not in every sentence.`);
+  if (p.facts.length) { lines.push('- Things to remember about them:'); for (const f of p.facts) lines.push(`  - ${f.text}`); }
+  return lines.join('\n');
+}
+// 改了记忆后让「正在跑的大脑」立刻吃到新档案：resume 同一 session 重启（保上下文，跟切模型同款）。
+// 只在「主机拦下、没喂给大脑」的显式指令后调用；模型自己 [[remember]] 的事实它本就在上下文里，不必重启。
+function refreshBrainMemory() {
+  try { startBrain(currentMode, currentScenario, currentModel, currentSessionId || undefined); } catch (_) {}
+}
 
 // panelLoaded：桌宠聊天栏当前是否已经装着「当前会话」的内容。
 // 双击关语音只是 hide 面板（DOM 还在），所以再开时若已 loaded 就别重建，直接让它复现，免得整段重刷。
@@ -449,6 +516,12 @@ function applyPetMarkers(text) {
   // [[anim:happy|dizzy|wave|...|clawd-xxx.svg]] —— 表演一个一次性动画
   const am = t.match(/\[\[\s*anim\s*:\s*([a-z0-9._-]+)\s*\]\]/i);
   if (am) { const svg = animSvg(am[1]); if (svg) sayPet('', null, svg, ANIM_MS); }
+  // [[remember: ...]] / [[forget: ...]] —— 模型主动存/删一条长期记忆。
+  // 只落盘、不重启大脑：这条事实本就在它当前上下文里（是它自己说的），下次任何 startBrain 会从档案重读注入。
+  const rmk = t.match(/\[\[\s*remember\s*:\s*([^\]]+?)\s*\]\]/i);
+  if (rmk) addMemory(rmk[1]);
+  const fgk = t.match(/\[\[\s*forget\s*:\s*([^\]]+?)\s*\]\]/i);
+  if (fgk) forgetMemory(fgk[1]);
   // 抠掉所有标记（已识别的 + 任何残留的 [[...]]），保证一个字都不会被读出来/显示
   t = t.replace(/\[\[[^\]]*\]\]/g, '');
   return t.replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+\n/g, '\n').trim();
@@ -620,6 +693,25 @@ function parseCommand(text) {
     }
   }
   if (r && r[1] && r[1].trim()) return { kind: 'rename', title: r[1].trim().replace(/^["'“”]+|["'“”。.!！?？]+$/g, '') };
+
+  // ── 记忆/认得你（本地直接存，不喂大脑 → 即时回执 + resume 重启让大脑立刻吃到新档案）──
+  // 清空：「忘记我」连名字一起清；「清空记忆/忘掉所有」只清事实留名字。都要求整句就是这个意思（锚定），别误吃「忘掉我喜欢简短」。
+  if (/^(?:忘记我(?:吧|了)?|forget me)[。.!！]?$/i.test(t)) return { kind: 'forget', all: true, wipeName: true };
+  if (/^(?:清空(?:记忆|所有记忆|全部记忆)?|忘(?:掉|记)(?:所有|全部|一切)(?:记忆|事情|的事)?|全部忘(?:掉|记)|forget everything|forget all|clear (?:your |all )?memory|wipe (?:your )?memory)[。.!！]?$/i.test(t))
+    return { kind: 'forget', all: true };
+  // 删某条：忘掉X / 别记着X了 / forget X（锚在句首；「别忘了X」不在此列，那是「记住」）
+  let fg = t.match(/^(?:忘(?:掉|记)(?:一下)?|别记(?:着|住)了?|删(?:掉|除)记忆)\s*[:：,，]?\s*(.+)$/)
+        || t.match(/^(?:forget|drop|remove)\s+(?:that\s+)?(?:i\s+)?(.+)$/i);
+  if (fg && fg[1] && fg[1].trim()) return { kind: 'forget', text: fg[1].trim().replace(/^["'“”]+|["'“”。.!！?？]+$/g, '') };
+  // 设名字（保守：单个短 token、整句就这意思，避免「我是说…/I'm tired」误判；含糊的留给大脑用 [[remember]] 兜）
+  let nm = t.match(/^(?:我(?:就)?叫|叫我|请叫我|你可以叫我|我(?:的)?名字(?:是|叫))\s*([^\s，。,.!！?？]{1,20})\s*[。.!！~]?$/)
+        || t.match(/^(?:my name is|call me|you can call me)\s+([a-z][a-z .'-]{0,20})\s*[.!]?$/i);
+  if (nm && nm[1] && nm[1].trim()) return { kind: 'setname', name: nm[1].trim() };
+  // 记一条：记住X / 记一下X / 别忘了X / remember X / note X
+  let rmem = t.match(/^(?:记住|记一下|记下来?|记一记|帮我记(?:住|一下|下来?)?|别忘了?|别忘记)\s*[:：,，]?\s*(.+)$/)
+          || t.match(/^(?:remember|note|keep in mind|don'?t forget)\s*(?:that\s+)?[:：,]?\s*(.+)$/i);
+  if (rmem && rmem[1] && rmem[1].trim()) return { kind: 'remember', text: rmem[1].trim() };
+
   // 斜杠：/model opus、/opus
   let m = t.match(/^\/(?:model\s+)?(haiku|sonnet|opus)\b/i);
   if (m) return { kind: 'model', model: m[1].toLowerCase() };
@@ -770,6 +862,25 @@ async function handleUtterance(text, oneShot) {
           }
           ack = cmd.ack ?? '好。';                     // 显式空串 = 不出声（被叫闭嘴就别回嘴），只做动作
           console.log(`  [pet] ${JSON.stringify(cmd)}`);
+        }
+        else if (cmd.kind === 'remember') {            // 记一条 → 落盘 + resume 重启让大脑立刻吃到（这条没喂给大脑）
+          const zh = /[一-鿿]/.test(mine);
+          addMemory(cmd.text); refreshBrainMemory();
+          petAnim = 'clawd-notification.svg';          // 「记下了」举灯泡
+          ack = zh ? '好，我记住了。' : "Got it, I'll remember that.";
+        }
+        else if (cmd.kind === 'setname') {             // 记名字
+          const zh = /[一-鿿]/.test(mine);
+          const nm = setName(cmd.name); refreshBrainMemory();
+          petAnim = 'clawd-happy.svg';
+          ack = zh ? `好的，${nm}，我记住啦。` : `Nice to meet you, ${nm}. I'll remember that.`;
+        }
+        else if (cmd.kind === 'forget') {              // 删一条 / 清空
+          const zh = /[一-鿿]/.test(mine);
+          if (cmd.all) { clearMemory(cmd.wipeName); ack = cmd.wipeName ? (zh ? '好，关于你的记忆我都清空了。' : "Okay, I've cleared everything I knew about you.") : (zh ? '好，我把记住的事都清空了。' : "Okay, I've cleared what I remembered."); }
+          else { const n = forgetMemory(cmd.text); ack = n ? (zh ? '好，我忘掉了。' : 'Okay, I forgot that.') : (zh ? '我记忆里没有这条。' : "I don't have that in my memory."); }
+          refreshBrainMemory();
+          petAnim = 'clawd-happy.svg';
         }
         else ack = switchMode(cmd.mode, cmd.scenario);
       } catch (e) { ack = '切换失败：' + e.message; }
@@ -1245,6 +1356,7 @@ function applyMic(device) {
   if (wasRec) startMic();                                  // 之前在录就接着录(新设备)
   if (knockMic) { stopKnockListener(); startKnockListener(); }
   console.log('  [mic] 切到设备', MIC);
+  saveRuntimeConfig();
   return true;
 }
 // 按 id 重命名任意会话:当前会话走 renameSession;其它会话直接改盘上 json。
@@ -1265,6 +1377,34 @@ function deleteSessionById(id) {
   console.log('  [session] 删除', id);
   return true;
 }
+// 设置页改的偏好落盘,重启自动恢复(只存设备/偏好类,不存 model/mode —— 那俩跟着会话走)。
+const CONFIG_FILE = process.env.COACH_CONFIG_FILE || join(homedir(), '.coach-config.json');
+function saveRuntimeConfig() {
+  try {
+    writeFileSync(CONFIG_FILE, JSON.stringify({
+      mic: MIC, volume: ttsVolume, voiceFx: VOICE_FX,
+      bargeVoice: BARGE_VOICE, bargeRms: BARGE_RMS, bargeSustainMs: BARGE_SUSTAIN_MS,
+      knock: KNOCK_ENABLED, wake: WAKE_ENABLED, wakeThreshold: WAKE_THRESHOLD,
+      musicApp: MUSIC_APP,
+    }));
+  } catch (_) {}
+}
+// 启动时把落盘的偏好读回(只赋值,不触发副作用 —— 紧接着的 startIdleWake/startMusicWatch 会用这些值)。
+function loadRuntimeConfig() {
+  let s; try { s = JSON.parse(readFileSync(CONFIG_FILE, 'utf8')); } catch (_) { return; }
+  if (!s || typeof s !== 'object') return;
+  if (typeof s.mic === 'string' && s.mic) MIC = s.mic;
+  if (Number.isFinite(s.volume)) ttsVolume = Math.max(0, Math.min(1, s.volume));
+  if (typeof s.voiceFx === 'boolean') VOICE_FX = s.voiceFx;
+  if (typeof s.bargeVoice === 'boolean') BARGE_VOICE = s.bargeVoice;
+  if (Number.isFinite(s.bargeRms)) BARGE_RMS = s.bargeRms;
+  if (Number.isFinite(s.bargeSustainMs)) BARGE_SUSTAIN_MS = s.bargeSustainMs;
+  if (typeof s.knock === 'boolean') KNOCK_ENABLED = s.knock;
+  if (typeof s.wake === 'boolean') WAKE_ENABLED = s.wake;
+  if (Number.isFinite(s.wakeThreshold)) { WAKE_THRESHOLD = s.wakeThreshold; process.env.COACH_WAKE_THRESHOLD = String(s.wakeThreshold); }
+  if (typeof s.musicApp === 'string') MUSIC_APP = s.musicApp;
+  console.log('[config] 已恢复偏好:' + CONFIG_FILE);
+}
 // 当前可调配置快照(给设置页渲染)。
 function getConfig() {
   return {
@@ -1272,6 +1412,7 @@ function getConfig() {
     volume: ttsVolume, voiceFx: VOICE_FX,
     bargeVoice: BARGE_VOICE, bargeRms: BARGE_RMS, bargeSustainMs: BARGE_SUSTAIN_MS,
     knock: KNOCK_ENABLED, wake: WAKE_ENABLED, wakeThreshold: WAKE_THRESHOLD,
+    musicApp: MUSIC_APP,
   };
 }
 // 应用配置(只动传进来的字段;布尔=开关,数值带范围夹取)。
@@ -1301,8 +1442,59 @@ function applyConfig(c) {
     if (WAKE_ENABLED) { stopKnockListener(); vw.start(); }       // 开喊词 → 收掉敲击,起边车
     else { vw.stop(); if (KNOCK_ENABLED && (!sessionActive || panelHidden)) startKnockListener(); }
   }
+  if ('musicApp' in c) { MUSIC_APP = String(c.musicApp || '').trim(); startMusicWatch(); }
   console.log('  [config] 更新', JSON.stringify(c));
+  saveRuntimeConfig();   // 落盘 → 重启自动恢复
   return getConfig();
+}
+
+// ───────────────────────── 音乐联动:配的音乐 App 在放歌 → 桌宠跳律动(headphones-groove);暂停/停 → idle ─────────────────────────
+// 收进引擎(常驻,不用手动跑脚本)。仅在桌宠空闲(没在对话)时联动,不抢会话动画。
+// 判定:配的 App 在跑 且 nowplaying-cli 的 playbackRate>0(暂停=0);没装 nowplaying-cli 则退回"App 在跑就当在放"。
+let MUSIC_APP = process.env.COACH_MUSIC_APP || '';   // pgrep -if 模式;'' = 关闭
+let musicTimer = null, musicGrooving = false, musicLastGroove = 0;
+const MUSIC_GROOVE_ANIM = process.env.COACH_MUSIC_ANIM || 'clawd-headphones-groove.svg';
+function _runCmd(cmd, args) {
+  return new Promise((resolve) => {
+    try {
+      const p = spawn(cmd, args); let out = '';
+      p.stdout.on('data', (d) => { out += d; });
+      p.on('error', () => resolve(null));
+      p.on('exit', (code) => resolve({ code, out: out.trim() }));
+    } catch (_) { resolve(null); }
+  });
+}
+async function musicIsPlaying() {
+  if (!MUSIC_APP) return false;
+  const pg = await _runCmd('pgrep', ['-if', MUSIC_APP]);
+  if (!pg || pg.code !== 0 || !pg.out) return false;          // App 没开
+  const np = await _runCmd('nowplaying-cli', ['get', 'playbackRate']);
+  if (np && np.code === 0 && np.out && np.out !== 'null') {
+    const n = parseFloat(np.out);
+    if (Number.isFinite(n)) return n > 0;                     // 有 playbackRate → 以它为准(暂停=0)
+  }
+  return true;                                                // 没装 nowplaying-cli → App 开着就当在放
+}
+async function musicTick() {
+  if (!MUSIC_APP) return;
+  const idle = !speaking && (!sessionActive || panelHidden);  // 仅空闲态联动,不抢会话动画
+  const playing = idle && await musicIsPlaying();
+  const now = Date.now();
+  if (playing) {
+    if (!musicGrooving || now - musicLastGroove >= 12000) {    // 起跳 + 12s keepalive(防被别的状态切走)
+      sayPet('', ST_IDLE, MUSIC_GROOVE_ANIM, 600000); musicLastGroove = now;
+      if (!musicGrooving) console.log('[music] 在放歌 → 律动');
+    }
+    musicGrooving = true;
+  } else {
+    if (musicGrooving && idle) { sayPet('', ST_IDLE); console.log('[music] 暂停/停 → idle'); }   // 会话期(idle=false)不动它
+    musicGrooving = false;
+  }
+}
+function startMusicWatch() {
+  if (musicTimer) { clearInterval(musicTimer); musicTimer = null; }
+  if (musicGrooving) { sayPet('', ST_IDLE); musicGrooving = false; }
+  if (MUSIC_APP) { musicTimer = setInterval(musicTick, 4000); console.log('[music] 联动开启:' + MUSIC_APP); }
 }
 
 const controlServer = http.createServer((req, res) => {
@@ -1310,6 +1502,11 @@ const controlServer = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/config') {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ ok: true, config: getConfig(), current: currentSessionId, sessions: listSessions(50) }));
+    return;
+  }
+  if (req.method === 'GET' && req.url === '/memory') {   // 读当前记忆档案（名字 + 事实），给设置页/菜单展示用
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, profile: loadProfile() }));
     return;
   }
   if (req.method === 'GET' && req.url === '/mics') {
@@ -1461,8 +1658,10 @@ console.log(STT === 'local' ? `[stt] 本机 whisper-server（${WHISPER_MODEL.spl
 // boot 是空闲态(无会话):不空跑 Scribe 麦,改进入空闲唤醒(声纹优先,敲两下兜底)。
 // 会话一开 startSession() 会 stopIdleWake() 并由 resumeListen() 接管 Scribe 麦。
 // 先清掉上一轮引擎被 kill -9 后遗留的孤儿唤醒边车(否则多个边车同时上报 /wake → 一喊连触发两三次)。
+loadRuntimeConfig();              // 先恢复落盘的偏好(麦克风/音量/打断/唤醒/音乐 App),下面的 watcher 就用这些值
 try { spawn('pkill', ['-f', 'wake-listener.py']).on('error', () => {}); } catch (_) {}
 setTimeout(startIdleWake, 400);   // 等孤儿被收掉再起自己的边车
+startMusicWatch();                // 音乐联动(配了 App 才起;设置页/落盘的选择会被 loadRuntimeConfig 恢复)
 
 function shutdown() {
   console.log('\n  收尾…');
@@ -1471,6 +1670,7 @@ function shutdown() {
   try { if (whisperProc) whisperProc.kill('SIGKILL'); } catch (_) {}   // 收掉常驻 whisper-server
   try { getVoiceWake().stop(); } catch (_) {}                          // 收掉唤醒边车,别留孤儿
   try { stopKnockListener(); } catch (_) {}
+  try { if (musicTimer) clearInterval(musicTimer); } catch (_) {}
   killBrain();
   process.exit(0);
 }

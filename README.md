@@ -272,21 +272,22 @@ Without it, waits are simply silent.
 
 ### 10. Run it
 ```bash
-cd claude-baby
-./start.sh
+hello claude
 ```
-This launches the pet (`clawd-on-desk` with `CLAWD_COACH_MODE=1`) and the engine (`coach-engine.js`) in the background. Logs go to `/tmp/clawd-pet.log` and `/tmp/coach-engine.log`.
+`setup.sh` installs this as a shell function. It starts — or restarts, since it frees the port and kills old instances first — the pet (`clawd-on-desk` with `CLAWD_COACH_MODE=1`) and the engine (`coach-engine.js`) in the background. Logs go to `/tmp/clawd-pet.log` and `/tmp/coach-engine.log`. (Didn't install it, or skipped `setup.sh`? Run `./start.sh` from the `claude-baby` folder instead.)
 
 ### 11. Grant mic permission and talk
 On first run macOS asks for microphone permission — click **Allow**. Then **double-click the pet** (or shout "Claude" if you enabled the wake word) and start talking.
 
 **Stop everything:**
 ```bash
-pkill -f coach-engine.js
-pkill -9 -f "clawd-on-desk/node_modules/electron"
+hello stop      # or, by hand:
+pkill -f coach-engine.js && pkill -9 -f "clawd-on-desk/node_modules/electron"
 ```
 
-> Prefer two terminals instead of `start.sh`? Run `CLAWD_COACH_MODE=1 npm start` in `clawd-on-desk`, and `node coach-engine.js` in `claude-baby`.
+**Update to the latest code:** `git pull` in both `claude-baby` and `clawd-on-desk`, then `hello claude` again. No build step, no re-install (no new deps).
+
+> Prefer two terminals? Run `CLAWD_COACH_MODE=1 npm start` in `clawd-on-desk`, and `node coach-engine.js` in `claude-baby`.
 
 ---
 

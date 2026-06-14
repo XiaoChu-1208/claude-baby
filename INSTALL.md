@@ -67,11 +67,13 @@ Skip both by default if the human didn't ask.
 ```
 This launches the pet (`clawd-on-desk` with `CLAWD_COACH_MODE=1`) and the engine (`coach-engine.js`) in the background. Logs: `/tmp/clawd-pet.log` and `/tmp/coach-engine.log`.
 Stop with: `pkill -f coach-engine.js && pkill -9 -f "clawd-on-desk/node_modules/electron"`.
+(`setup.sh` also installs a `hello claude` / `hello stop` shell function — the human's everyday start/stop. It runs the same `start.sh`, but needs a fresh terminal to take effect, so this runbook uses `./start.sh` directly.)
 
 ## 6. Tell the human how to use it
 - On first run macOS asks for **microphone permission** — click **Allow**.
 - **Double-click the pet** (or shout "Claude" if the wake word was enabled) and start talking.
-- To re-apply future code updates: `git pull` in both `claude-baby` and `clawd-on-desk`, then re-run `./start.sh`. There is no build step.
+- From now on, start/restart with **`hello claude`** and stop with **`hello stop`** (open a new terminal first if you just installed).
+- To re-apply future code updates: `git pull` in both `claude-baby` and `clawd-on-desk`, then `hello claude` again. There is no build step and no re-install (no new deps).
 
 ## Guardrails
 - Never fabricate secrets (API keys, tokens).

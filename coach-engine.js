@@ -179,21 +179,25 @@ const TOOL_ANIM = {
   write: 'clawd-working-building.svg',                                       // 创建新代码/新文件 = 搭建(build)
   edit: 'clawd-working-typing.svg', multiedit: 'clawd-working-typing.svg', notebookedit: 'clawd-working-typing.svg', // 改已有代码 = 打字
   read: 'clawd-idle-reading.svg', grep: 'clawd-idle-reading.svg', glob: 'clawd-idle-reading.svg', ls: 'clawd-idle-reading.svg',  // 看文件 = 读书
-  websearch: 'clawd-working-wizard.svg', webfetch: 'clawd-working-wizard.svg',  // 上网 = 施法
+  websearch: 'clawd-idle-reading.svg', webfetch: 'clawd-idle-reading.svg',  // 搜索/上网查资料 = 看书
   task: 'clawd-working-carrying.svg', agent: 'clawd-working-carrying.svg',       // 派活 = 搬运
   todowrite: 'clawd-working-sweeping.svg',                                       // 整理清单 = 打扫
 };
 // 搜索/遍历/只读类命令（含 Bash 里跑的）→ 看书动画
 const READ_CMD_RE = /(?:^|[|&;]\s*)(?:ls|find|fd|grep|rg|ag|cat|bat|head|tail|tree|wc|stat|file|du|less|more|locate|glob|awk)\b|\bgrep\b|\bfind\b|\brg\b/;
+// 打开软件/操作系统/控制设备类命令 → 施法(魔法师)
+const OPEN_CMD_RE = /(?:^|[|&;]\s*)(?:open|osascript|launchctl|defaults|killall|pkill|say|afplay|caffeinate|pmset|networksetup|shortcuts|automator|spotify|cliclick|screencapture)\b/i;
 function toolLine(block) {
   toolUsedThisTurn = true;
   const n = String(block.name || '').toLowerCase();
   let anim;
   if (n === 'bash') {
     const cmd = String((block.input && block.input.command) || '').trim();
-    anim = READ_CMD_RE.test(cmd) ? 'clawd-idle-reading.svg' : 'clawd-working-typing.svg';  // 搜索/遍历=看书；其它命令=打字
+    if (OPEN_CMD_RE.test(cmd)) anim = 'clawd-working-wizard.svg';        // 打开软件/操作设备=施法
+    else if (READ_CMD_RE.test(cmd)) anim = 'clawd-idle-reading.svg';     // 搜索/遍历=看书
+    else anim = 'clawd-working-typing.svg';                              // 其它命令=打字
   } else {
-    anim = TOOL_ANIM[n] || (n.startsWith('mcp') ? 'clawd-working-wizard.svg' : 'clawd-working-typing.svg');
+    anim = TOOL_ANIM[n] || (n.startsWith('mcp') ? 'clawd-working-wizard.svg' : 'clawd-working-typing.svg');  // MCP 操作外部=施法
   }
   console.log(`  [tool] ${block.name || 'tool'} → ${anim}`);
   sayPet('', ST_WORK, anim, 600000);   // 长 animMs：持续到下次状态切换
@@ -212,7 +216,10 @@ function enqueueTTS(text) {
 function drainTTS() {                     // 顺序朗读队列里的白气泡;打断时 turnAborted 会让它停
   if (_drainP) return _drainP;
   _drainP = (async () => {
-    while (ttsQueue.length && !turnAborted) { await speakTTS(ttsQueue.shift()); }
+    while (ttsQueue.length && !turnAborted) {
+      sayPet('', ST_IDLE, SPEAK_ANIM, SPEAK_MS);   // 开口前跳一下→落地正常说(脱离工具的魔法师/打字动画)
+      await speakTTS(ttsQueue.shift());
+    }
     _drainP = null;
   })();
   return _drainP;

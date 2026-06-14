@@ -77,14 +77,14 @@ const COACH_OPENER = "Let's begin. Give a short, natural opening line in charact
 // ───────────────────────── agent 模式：通用助手（追加在 Claude Code 默认大脑之上）─────────────────────────
 // 注意：agent 模式不替换系统提示，用 --append-system-prompt 追加这段，保留 Claude Code 自身的
 // 干活能力（工具、skills、CLAUDE.md）。这段只交代「我是被语音/桌宠驱动的」这件事。
-const AGENT_ADDENDUM = `You are running as a voice-and-desktop-pet assistant. The user talks to you by voice (Chinese or English, auto-detected) and also reads your replies on a small on-screen chat panel; a one-line spoken summary is read aloud via TTS.
+const AGENT_ADDENDUM = `You are Claude Code. Your on-screen form is a small desktop pet, but that is ONLY your appearance — it does NOT limit what you can do. You keep your full agentic capabilities: read/edit files, run commands, search the web, use MCP servers and skills, and finish multi-step tasks. Behave exactly as you would in a normal Claude Code session — same competence, same initiative, same willingness to dig in. The user talks to you by voice and reads your replies on a small chat panel; the first sentence is also read aloud by TTS.
 
 Behaviour:
 - You are a capable general assistant AND can do real work: use your tools to read/edit files, run commands, search, and finish tasks in the working directory. Don't just describe what to do — do it.
-- Language: DEFAULT TO ENGLISH. Always reply in English when I speak English. Only switch to Chinese if I explicitly ask you to (e.g. "说中文" / "用中文" / "切到中文" / "speak Chinese"); once I ask, keep replying in Chinese until I ask to switch back to English. Do NOT switch to Chinese just because a message happens to contain some Chinese words.
-- Keep prose tight. Put code, file paths, and commands in the answer text (it shows on the panel), but make the FIRST sentence a short plain-language summary of what you did or found — that first sentence is what gets read aloud, so it must stand alone and contain no code or markdown.
-- VOICE-FRIENDLY OUTPUT: your replies are read aloud by TTS. NEVER use emoji. Avoid decorative symbols and symbol runs (no ***, ---, ##, ->, =>, •, |, backticks, etc. in prose). Say things the way you'd speak them: write "about 50 percent" not "~50%", "and" not "&", "number 3" not "#3". The first spoken sentence especially must be plain words and ordinary punctuation only. Code/paths can still go in the panel body below, just keep the spoken parts clean.
-- For quick questions, just answer in 1–3 sentences. For real tasks, do the work with tools, then report the result concisely.
+- ACT, DON'T STALL — THIS IS CRITICAL: This reply is the ONLY thing that happens for this turn; there is no "later" and no background work. If the user asks you to find / search / look up / check / open / build / send / fix / do anything, you MUST actually call the tools and do it RIGHT NOW, in this same reply, then report what you found or did. A request like "你帮我搜一下有没有…工具" / "find me a tool" REQUIRES a web search this turn. NEVER answer with only a filler acknowledgment like "我看看" / "让我看看" / "我搜搜" / "let me look" / "I'll check" and then stop — a reply that promises action but calls no tools is a FAILURE. If you truly cannot act, say specifically why; otherwise act.
+- Reply in the language the user is speaking to you in (Chinese or English); follow them if they switch.
+- Work like ReAct, out loud: it is good to think in short bursts — say what you are about to do, do it with tools, then report what you found — instead of cramming everything into one block. Each thing you say becomes its own chat bubble, and the host shows every TOOL action you take as its own separate command bubble automatically — so you do NOT need to describe your tool calls in prose; just take the action and let the host display it. Be as thorough as the task needs; never artificially shorten real work.
+- Voice layer (light touch): the lines you mean as speech are read aloud, so keep those plain and speakable — no emoji, no symbol runs (***, ##, ->, •, backticks) in the spoken parts. Code, paths, and details are fine in the reply text; they show on the panel and are not forced into speech.
 - Model switching AND session renaming are handled by the host: when the user asks to switch to opus/sonnet/haiku, or to rename/name this session/conversation, the host does it before you ever see the message. So you never need to switch your own model or rename anything yourself, and must NEVER suggest "/fast", "/config", claim you can't change models, or say renaming is a "system setting" / tell the user to use the Claude Code UI. Just answer whatever non-control request remains (if it was purely a switch/rename, a brief "done" is enough).
 - Speaking volume: you can change your own spoken volume by putting a marker like [[volume:0.5]] anywhere in your reply (0.0 = silent, 1.0 = normal). The host applies it and strips the marker before anything is shown or read aloud, so the user never sees it. Only use it when the user asks you to be louder/quieter; simple volume requests are usually already handled before you see them.
 - CONTROL YOUR OWN BODY (you are an on-screen desktop pet): you may drive your own appearance by putting markers anywhere in your reply. The host applies them and strips them out, so they are never spoken or shown. Available:
@@ -153,8 +153,13 @@ function startBrain(mode, scenario, model, resumeId) {
       if (!pending) continue;
       if (ev.type === 'assistant' && ev.message && Array.isArray(ev.message.content)) {
         for (const b of ev.message.content) {
-          if (b.type === 'text' && b.text) pending.text += b.text;
-          else if (b.type === 'tool_use') toolLine(b);       // agent 干活过程 → 聊天栏 + 日志
+          if (b.type === 'text' && b.text) {
+            if (pending.stream) streamAssistantText(b.text);   // ReAct:边想边说 → 每块一个白气泡 + 朗读
+            else pending.text += b.text;                       // 非流式(coach/开场白)→ 累积,末尾一次性返回
+          } else if (b.type === 'tool_use') {
+            toolLine(b);                                       // 干活动画 + 日志
+            if (pending.stream) streamToolUse(b);              // 汇报命令 → 黑气泡(不出声)
+          }
         }
       } else if (ev.type === 'result') {
         const p = pending; pending = null; clearTimeout(p.timer);
@@ -193,6 +198,56 @@ function toolLine(block) {
   console.log(`  [tool] ${block.name || 'tool'} → ${anim}`);
   sayPet('', ST_WORK, anim, 600000);   // 长 animMs：持续到下次状态切换
 }
+
+// ───────────────────────── ReAct 流式发气泡 + 朗读队列 ─────────────────────────
+// 白气泡(assistant 文字)=显示+朗读;黑气泡(工具调用)=只显示、不出声。一轮可发多个。
+let streamedThisTurn = false;            // 本轮是否已流式发过气泡(发过 → 末尾不再重复发 result)
+let ttsQueue = [], _drainP = null;
+function enqueueTTS(text) {
+  const t = String(text || '').trim();
+  if (!t) return;
+  ttsQueue.push(t);
+  drainTTS();
+}
+function drainTTS() {                     // 顺序朗读队列里的白气泡;打断时 turnAborted 会让它停
+  if (_drainP) return _drainP;
+  _drainP = (async () => {
+    while (ttsQueue.length && !turnAborted) { await speakTTS(ttsQueue.shift()); }
+    _drainP = null;
+  })();
+  return _drainP;
+}
+function clearTTSQueue() { ttsQueue = []; }
+function streamAssistantText(raw) {       // 一段 assistant 文字 → 白气泡 + 朗读
+  let t = applyPetMarkers(String(raw || ''));   // 应用并抠掉 [[markers]]
+  t = t.trim();
+  if (!t) return;
+  streamedThisTurn = true;
+  recordTurn('coach', t);
+  chat({ type: 'add', role: 'coach', text: t });
+  enqueueTTS(spokenFrom(t));
+}
+function streamToolUse(block) {            // 一次 tool_use → 黑色命令气泡(不出声、不记录)
+  const label = toolBubbleText(block);
+  if (label) chat({ type: 'add', role: 'coach', text: label, variant: 'cmd' });
+}
+function toolBubbleText(b) {
+  const n = String(b && b.name || '').toLowerCase();
+  const i = (b && b.input) || {};
+  const clip = (s, m) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim().slice(0, m || 160);
+  if (n === 'bash') return '$ ' + clip(i.command, 220);
+  if (n === 'websearch') return 'Search: ' + clip(i.query, 140);
+  if (n === 'webfetch') return 'Fetch: ' + clip(i.url, 140);
+  if (n === 'read') return 'Read ' + clip(i.file_path || i.path, 180);
+  if (n === 'edit' || n === 'multiedit' || n === 'notebookedit') return 'Edit ' + clip(i.file_path, 180);
+  if (n === 'write') return 'Write ' + clip(i.file_path, 180);
+  if (n === 'grep') return 'Grep ' + clip(i.pattern, 140);
+  if (n === 'glob' || n === 'ls') return (b.name || 'ls') + ' ' + clip(i.pattern || i.path, 140);
+  if (n === 'task' || n === 'agent') return 'Subagent: ' + clip(i.description || i.prompt, 140);
+  if (n === 'todowrite') return 'Updating plan…';
+  if (n.startsWith('mcp')) return (b.name || 'mcp') + ' ' + clip(JSON.stringify(i), 140);
+  return (b.name || 'tool') + ' ' + clip(JSON.stringify(i), 140);
+}
 // 把大脑的报错翻成给用户的人话:分清「额度到顶/限流」「会话太长」「超时」,别再一律 "Sorry, something went wrong"。
 function brainErrMsg(raw) {
   const s = String(raw || '').toLowerCase();
@@ -207,12 +262,13 @@ function brainErrMsg(raw) {
   return currentMode === 'agent' ? 'Sorry, something went wrong or timed out.' : '';
 }
 let pendingImages = [];   // [{media_type,data}] 下一次 ask 作为图片块附上(聊天栏粘贴的剪贴板图片,可多张);用后清空
-function ask(text) {
+function ask(text, opts) {
+  const stream = !!(opts && opts.stream);   // 流式:边收边发气泡(白=朗读/黑=工具,见 stdout 处理)
   return new Promise((resolve, reject) => {
     if (!brainProc) return reject(new Error('brain not started'));
     if (pending) return reject(new Error('brain busy'));
     const ms = currentMode === 'agent' ? 300000 : 60000;   // agent 干活给 5 分钟，coach 对话 60s
-    pending = { resolve, reject, text: '', timer: setTimeout(() => {
+    pending = { resolve, reject, text: '', stream, timer: setTimeout(() => {
       const p = pending; pending = null;
       // 超时:claude 子进程可能还卡在这一轮 → 杀掉重起(保上下文),否则它会继续处理旧轮、与之后的轮串位,导致后面每轮都坏。
       console.error('  [brain] 超时 ' + (ms / 1000) + 's → 重启大脑(保上下文)');
@@ -645,7 +701,7 @@ function doBarge() {
   // 「!」惊吓跳：只发叠加动画，base 用 idle —— 千万别用 'notification' 状态，那是「举着灯泡」的图！
   // （叠加动画能挺过随后 resumeListen 的 setState，确保看得见这一下。）
   sayPet('', ST_IDLE, ALERT_ANIM, 900);
-  turnAborted = true; _bargeBytes = 0;                                                  // 整轮作废：思考阶段点也算，回复回来也不会开口
+  turnAborted = true; _bargeBytes = 0; clearTTSQueue();                                 // 整轮作废：思考阶段点也算，回复回来也不会开口;清掉待念的流式气泡
   ttsAborted = true; if (currentAfplay) { try { currentAfplay.kill('SIGKILL'); } catch (_) {} }  // 立刻掐掉正在播 / 正在合成的语音（SIGKILL 瞬停，不等优雅退出）
   // 还在思考（大脑没出结果、还没开口）→ 立刻取消这轮等待，马上把话筒还给你，别等它生成完
   if (pending) { const p = pending; pending = null; clearTimeout(p.timer); try { p.resolve(''); } catch (_) {} }
@@ -838,6 +894,7 @@ async function handleUtterance(text, oneShot) {
   speaking = true; forwarding = false;            // 半双工：先闭麦再开口
   turnAborted = false;                            // 新一轮开始 → 清掉上一轮的打断标记
   toolUsedThisTurn = false;
+  streamedThisTurn = false; clearTTSQueue();       // 流式状态归零
   const mine = trimmed;
   const isSlash = !hasImg && mine.startsWith('/');   // 透传给大脑的 Claude Code 斜杠命令(/compact 等)
   try {
@@ -914,36 +971,40 @@ async function handleUtterance(text, oneShot) {
     // 思考：opus 用「超级思考」动画，sonnet/haiku 用普通思考
     if (isSlash) sayPet('', ST_WORK, 'clawd-working-typing.svg', 600000);   // 斜杠命令:coding 动画,不垫思考音、不出声
     else { sayPet('', ST_THINK, currentModel === 'opus' ? 'clawd-working-ultrathink.svg' : null, currentModel === 'opus' ? 600000 : undefined); playAck(ACK_LONG); }
+    const useStream = currentMode === 'agent' && !isSlash;   // agent 普通轮 → ReAct 流式;coach/斜杠 → 一次性
     let reply = '', errored = false;
-    try { reply = await ask(mine); }
+    try { reply = await ask(mine, { stream: useStream }); }
     catch (e) {
       console.error('  [brain]', e.message);
       // 僵尸会话:claude 端文件丢了(首轮就失败、没建成),--resume 永远 "No conversation found"。
       // → 丢掉坏的 session,起一个全新的(无 resume),把这轮重发一次,自动救活,不用用户手动新建。
       if (/no conversation found|session id/i.test(e.message)) {
         console.error('  [brain] 会话丢失 → 起全新 session 重试这轮');
-        try { startBrain(currentMode, currentScenario, currentModel); reply = await ask(mine); }
+        try { startBrain(currentMode, currentScenario, currentModel); reply = await ask(mine, { stream: useStream }); }
         catch (e2) { console.error('  [brain] 重试仍失败:', e2.message); errored = true; reply = brainErrMsg(e2.message); }
       } else { errored = true; reply = brainErrMsg(e.message); }
     }
     // 关键：生成期间若已结束/隐藏/被点击打断 → 别再说话（否则关了/打断了还在说）
     if (!sessionActive || panelHidden || turnAborted) return;
-    // Claude 自驱桌宠:回复里带 [[volume]] / [[size]] / [[mini]] / [[anim]] 等标记
-    // → 应用对应动作并从文本里抠掉(不显示/不朗读)。可能整段都是标记 → reply 变空、只剩动作。
-    if (reply) reply = applyPetMarkers(reply);
-    // Claude Code 斜杠命令(/compact 等)常返回空 → 给个明确回执,别让用户以为没反应。
-    if (!reply && isSlash && !errored) reply = (mine === '/compact' ? 'Compacted the conversation.' : 'Done.');
-    if (reply) {
-      console.log(`  Coach: ${reply}`);
-      if (!errored) recordTurn('coach', reply);        // 成功回复进会话记录
-      chat({ type: 'add', role: 'coach', text: reply, variant: isSlash ? 'cmd' : undefined }); // 完整答案进聊天记录;斜杠命令走黑色变体
-      const spoken = spokenFrom(reply);                  // agent 模式只念精简口语小结
-      // 斜杠命令:不出声、coding 收尾;否则 出错→晕 / 干完活→开心 / 普通→说话单跳
-      if (isSlash) sayPet('', ST_IDLE, 'clawd-working-typing.svg', 1200);
-      else if (errored) sayPet('', ST_ERR, 'clawd-dizzy.svg', SPEAK_MS);
-      else if (toolUsedThisTurn) sayPet('', ST_HAPPY, 'clawd-happy.svg', 1600);
-      else sayPet('', ST_IDLE, SPEAK_ANIM, SPEAK_MS);
-      if (spoken && !isSlash) await speakTTS(spoken);   // 斜杠命令:不发语音
+    if (streamedThisTurn) {
+      // ReAct 已经流式发过白/黑气泡 + 入朗读队列 → 不重复发 result,等朗读念完再把回合交回
+      await drainTTS();
+      if (!turnAborted && toolUsedThisTurn) sayPet('', ST_HAPPY, 'clawd-happy.svg', 1600);   // 干完活开心一下
+    } else {
+      // 没流式(coach / 错误 / 斜杠空回执 / 只用了工具没出文字)→ 一次性发 + 朗读
+      if (reply) reply = applyPetMarkers(reply);   // 应用并抠掉 [[markers]]
+      if (!reply && isSlash && !errored) reply = (mine === '/compact' ? 'Compacted the conversation.' : 'Done.');
+      if (reply) {
+        console.log(`  Coach: ${reply}`);
+        if (!errored) recordTurn('coach', reply);
+        chat({ type: 'add', role: 'coach', text: reply, variant: isSlash ? 'cmd' : undefined });
+        const spoken = spokenFrom(reply);
+        if (isSlash) sayPet('', ST_IDLE, 'clawd-working-typing.svg', 1200);
+        else if (errored) sayPet('', ST_ERR, 'clawd-dizzy.svg', SPEAK_MS);
+        else if (toolUsedThisTurn) sayPet('', ST_HAPPY, 'clawd-happy.svg', 1600);
+        else sayPet('', ST_IDLE, SPEAK_ANIM, SPEAK_MS);
+        if (spoken && !isSlash) await speakTTS(spoken);
+      }
     }
   } finally {
     // 无论正常/出错：保证 speaking 复位、（没隐藏则）恢复你的回合输入框（暂停时也给灰输入框）
@@ -1265,7 +1326,7 @@ function bargeWatch(chunk) {   // 在它说话/干活期间被主麦数据回调
 // 真打断(等价 Claude Code 里按 ESC):给常驻 claude 发 stream-json 控制请求 interrupt,停掉它当前那一轮的活;
 // 同时本地按打断收尾(惊吓动画 + 立刻把回合还给你)。半截工具流由 CLI 自己停,之后大脑仍可接着用。
 function interruptBrain() {
-  turnAborted = true; ttsAborted = true; _bargeBytes = 0;
+  turnAborted = true; ttsAborted = true; _bargeBytes = 0; clearTTSQueue();
   if (currentAfplay) { try { currentAfplay.kill('SIGKILL'); } catch (_) {} }   // 掐掉正在播的垫播音
   try {
     if (brainProc && brainProc.stdin && brainProc.stdin.writable) {

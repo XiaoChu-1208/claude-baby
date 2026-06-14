@@ -20,12 +20,71 @@ if not os.path.exists(REF):
     sys.exit(1)
 
 try:
-    from eff_word_net.streams import SimpleMicStream
+    from eff_word_net.streams import SimpleMicStream, CustomAudioStream
     from eff_word_net.engine import HotwordDetector
     from eff_word_net.audio_processing import Resnet50_Arc_loss
+    from eff_word_net import RATE
 except Exception as e:  # noqa: BLE001
     print("[wake.py] 缺依赖: %s" % e, file=sys.stderr)
     sys.exit(1)
+
+# 设备选择:COACH_WAKE_MIC_NAME 指定输入设备名(子串匹配,大小写不敏感)。
+# 不设 → 用 PyAudio 默认输入设备(= 系统默认输入,这正是切麦切不动唤醒词的老 bug)。
+# 注意:PyAudio 设备索引 ≠ ffmpeg avfoundation 索引,所以必须按名字匹配,不能直接传 index。
+WAKE_MIC_NAME = os.environ.get("COACH_WAKE_MIC_NAME", "").strip()
+
+
+def _norm(s):
+    # 归一化设备名以容忍 avfoundation 与 CoreAudio 的命名差异:
+    # 剥 ASCII / 中文/弯引号、折叠所有空白、小写。例:「"Chenyang的iPhone"的麦克风」≈「Chenyang的iPhone的麦克风」。
+    s = "".join(ch for ch in str(s) if ch not in '"\'`“”‘’「」『』')
+    return "".join(s.split()).lower()
+
+
+def open_mic_stream(window_length_secs, sliding_window_secs):
+    """按 COACH_WAKE_MIC_NAME 开 PyAudio 输入流;命名匹配不到 / 没指定 → 退回 SimpleMicStream(默认设备)。"""
+    if not WAKE_MIC_NAME:
+        return SimpleMicStream(window_length_secs=window_length_secs,
+                               sliding_window_secs=sliding_window_secs)
+    import pyaudio
+    p = pyaudio.PyAudio()
+    want = _norm(WAKE_MIC_NAME)
+    dev_index, dev_name = None, None
+    inputs = []
+    for i in range(p.get_device_count()):
+        info = p.get_device_info_by_index(i)
+        if info.get("maxInputChannels", 0) <= 0:
+            continue
+        name = str(info.get("name", ""))
+        inputs.append((i, name))
+    # 先精确(归一化后)等值,再双向子串 —— 名字略有出入也能命中。
+    for i, name in inputs:
+        if _norm(name) == want:
+            dev_index, dev_name = i, name
+            break
+    if dev_index is None:
+        for i, name in inputs:
+            n = _norm(name)
+            if want and (want in n or n in want):
+                dev_index, dev_name = i, name
+                break
+    if dev_index is None:
+        print("[wake.py] 找不到输入设备含「%s」→ 退回默认设备" % WAKE_MIC_NAME, file=sys.stderr)
+        p.terminate()
+        return SimpleMicStream(window_length_secs=window_length_secs,
+                               sliding_window_secs=sliding_window_secs)
+    CHUNK = int(sliding_window_secs * RATE)
+    stream = p.open(format=pyaudio.paInt16, channels=1, rate=16000, input=True,
+                    input_device_index=dev_index, frames_per_buffer=CHUNK)
+    stream.stop_stream()
+    print("[wake.py] 唤醒麦 → [%d] %s" % (dev_index, dev_name), flush=True)
+    return CustomAudioStream(
+        open_stream=stream.start_stream,
+        close_stream=stream.stop_stream,
+        get_next_frame=lambda: np.frombuffer(stream.read(CHUNK, exception_on_overflow=False), dtype=np.int16),
+        window_length_secs=window_length_secs,
+        sliding_window_secs=sliding_window_secs,
+    )
 
 
 def trigger(conf, rms):
@@ -50,7 +109,7 @@ def main():
         threshold=THRESH,
         relaxation_time=2,
     )
-    mic = SimpleMicStream(window_length_secs=1.5, sliding_window_secs=0.75)
+    mic = open_mic_stream(window_length_secs=1.5, sliding_window_secs=0.75)
     mic.start_stream()
     print("[wake.py] 监听中:喊 Claude(阈值 %.2f)" % THRESH, flush=True)
     last = 0.0

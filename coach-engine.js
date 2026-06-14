@@ -1283,7 +1283,7 @@ function getVoiceWake() {
       onDown: () => { if (!sessionActive || panelHidden) startKnockListener(); },  // 边车挂了 → 回退敲两下
     });
     voiceWake.setEnabled(WAKE_ENABLED);   // 与运行时开关同步
-  } catch (_) { voiceWake = { start: () => false, stop: () => {}, restart: () => false, setEnabled: () => {}, isEnabled: () => false }; }
+  } catch (_) { voiceWake = { start: () => false, stop: () => {}, restart: () => false, setEnabled: () => {}, isEnabled: () => false, isRunning: () => false }; }
   return voiceWake;
 }
 // 敲醒 / 喊醒 → 直接进【录音】态：强制清掉暂停和「上轮打字」，让 resumeListen 开麦倾听，
@@ -1440,10 +1440,24 @@ function applyMic(device) {
   const wasRec = !!mic; stopMic();
   if (wasRec) startMic();                                  // 之前在录就接着录(新设备)
   if (knockMic) { stopKnockListener(); startKnockListener(); }
+  applyWakeMic();                                          // 唤醒词边车也跟着切(否则切了麦喊 Claude 唤不醒)
   console.log('  [mic] 切到设备', MIC);
   saveRuntimeConfig();
   petAck();
   return true;
+}
+// 把唤醒词边车切到当前 MIC 对应的设备:边车用 PyAudio 默认设备,不会自己跟着切。
+// PyAudio 索引 ≠ ffmpeg avfoundation 索引,只能按名字匹配 → 用 listMics() 把 MIC 索引解析成名字传过去。
+function applyWakeMic() {
+  const idx = Number(MIC.replace(/[^0-9]/g, ''));
+  listMics().then((mics) => {
+    const hit = mics.find((m) => m.index === idx);
+    if (!hit) { console.log('  [wake] 切麦:解析不到设备名(index', idx, ')→ 唤醒麦不变'); return; }
+    process.env.COACH_WAKE_MIC_NAME = hit.name;            // 下次 start() 即生效(spawn 时带 env)
+    const vw = getVoiceWake();
+    if (vw.isRunning()) { vw.restart(); console.log('  [wake] 唤醒麦 → 重启到', hit.name); }
+    else console.log('  [wake] 唤醒麦目标设为', hit.name, '(边车未在跑,下次启动生效)');
+  }).catch(() => {});
 }
 // 按 id 重命名任意会话:当前会话走 renameSession;其它会话直接改盘上 json。
 function renameSessionById(id, title) {

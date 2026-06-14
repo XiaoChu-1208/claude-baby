@@ -27,6 +27,7 @@ export function createVoiceWake(opts = {}) {
 
   function setEnabled(v) { on = !!v; }
   function isEnabled() { return on; }
+  function isRunning() { return !!proc; }
 
   function start() {
     if (!on) return false;                              // 没开 → 让位给敲两下
@@ -48,5 +49,5 @@ export function createVoiceWake(opts = {}) {
   function stop() { if (proc) { try { proc.kill('SIGKILL'); } catch (_) {} proc = null; } }
   function restart() { stop(); return start(); }   // 改了阈值(env)后重拉,让新阈值生效
 
-  return { start, stop, restart, setEnabled, isEnabled };
+  return { start, stop, restart, setEnabled, isEnabled, isRunning };
 }

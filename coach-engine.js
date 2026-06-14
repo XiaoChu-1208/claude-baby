@@ -177,7 +177,8 @@ let toolUsedThisTurn = false;
 const TOOL_ANIM = {
   bash: 'clawd-working-typing.svg',                                          // 跑命令 = 敲键盘(code)
   write: 'clawd-working-building.svg',                                       // 创建新代码/新文件 = 搭建(build)
-  edit: 'clawd-working-typing.svg', multiedit: 'clawd-working-typing.svg', notebookedit: 'clawd-working-typing.svg', // 改已有代码 = 打字
+  edit: 'clawd-working-typing.svg', notebookedit: 'clawd-working-typing.svg', // 改已有代码 = 打字
+  multiedit: 'clawd-working-typing-boss.svg',                                  // 多处批量改 = 火力全开打字(boss)
   read: 'clawd-idle-reading.svg', grep: 'clawd-idle-reading.svg', glob: 'clawd-idle-reading.svg', ls: 'clawd-idle-reading.svg',  // 看文件 = 读书
   websearch: 'clawd-idle-reading.svg', webfetch: 'clawd-idle-reading.svg',  // 搜索/上网查资料 = 看书
   task: 'clawd-working-carrying.svg', agent: 'clawd-working-carrying.svg',       // 派活 = 搬运
@@ -187,6 +188,8 @@ const TOOL_ANIM = {
 const READ_CMD_RE = /(?:^|[|&;]\s*)(?:ls|find|fd|grep|rg|ag|cat|bat|head|tail|tree|wc|stat|file|du|less|more|locate|glob|awk)\b|\bgrep\b|\bfind\b|\brg\b/;
 // 打开软件/操作系统/控制设备类命令 → 施法(魔法师)
 const OPEN_CMD_RE = /(?:^|[|&;]\s*)(?:open|osascript|launchctl|defaults|killall|pkill|say|afplay|caffeinate|pmset|networksetup|shortcuts|automator|spotify|cliclick|screencapture)\b/i;
+// 跑测试/调试 → 调试器动画
+const DEBUG_CMD_RE = /(?:^|[|&;]\s*)(?:pytest|jest|vitest|mocha|lldb|gdb|pdb|node\s+--inspect)\b|\b(?:go|cargo)\s+test\b|\b(?:npm|yarn|pnpm)\s+(?:run\s+)?test\b/i;
 function toolLine(block) {
   toolUsedThisTurn = true;
   const n = String(block.name || '').toLowerCase();
@@ -194,6 +197,7 @@ function toolLine(block) {
   if (n === 'bash') {
     const cmd = String((block.input && block.input.command) || '').trim();
     if (OPEN_CMD_RE.test(cmd)) anim = 'clawd-working-wizard.svg';        // 打开软件/操作设备=施法
+    else if (DEBUG_CMD_RE.test(cmd)) anim = 'clawd-working-debugger.svg';// 跑测试/调试=调试器
     else if (READ_CMD_RE.test(cmd)) anim = 'clawd-idle-reading.svg';     // 搜索/遍历=看书
     else anim = 'clawd-working-typing.svg';                              // 其它命令=打字
   } else {
@@ -535,7 +539,7 @@ function petAck() {
   const now = Date.now();
   if (now - _lastAck < 500) return;   // 连续拖滑块不狂跳
   _lastAck = now;
-  sayPet('', null, 'clawd-happy.svg', 900);
+  petHappy(900);                       // mini 时用 mini-happy
 }
 
 // ───────────────────────── Claude 自驱桌宠（改尺寸 / 进出 mini / 表演动画）─────────────────────────
@@ -703,11 +707,14 @@ function resumeListen() {
 // 点击打断（barge-in）：只在它正说话(TTS 播放中)时生效。先给「!」表情，再掐掉语音 →
 // speakTTS resolve → handleUtterance 的 finally 走 resumeListen，自动开你的回合（唤出输入框）。
 const ALERT_ANIM = process.env.COACH_ALERT_ANIM || 'clawd-react-double-jump.svg'; // 打断时:头顶大感叹号 + 惊吓跳
+// mini 感知:在 mini 模式发"状态"让 clawd 自动用 mini 变体(notification→mini-alert、attention→mini-happy);全屏用大动画。
+function petAlert() { if (inMini) sayPet('', ST_ALERT); else sayPet('', ST_IDLE, ALERT_ANIM, 900); }
+function petHappy(ms) { if (inMini) sayPet('', ST_HAPPY); else sayPet('', ST_IDLE, 'clawd-happy.svg', ms || 1300); }
 function doBarge() {
   if (!sessionActive || paused || panelHidden || !speaking) return false;
   // 「!」惊吓跳：只发叠加动画，base 用 idle —— 千万别用 'notification' 状态，那是「举着灯泡」的图！
-  // （叠加动画能挺过随后 resumeListen 的 setState，确保看得见这一下。）
-  sayPet('', ST_IDLE, ALERT_ANIM, 900);
+  // （叠加动画能挺过随后 resumeListen 的 setState，确保看得见这一下。）mini 时改发 mini-alert。
+  petAlert();
   turnAborted = true; _bargeBytes = 0; clearTTSQueue();                                 // 整轮作废：思考阶段点也算，回复回来也不会开口;清掉待念的流式气泡
   ttsAborted = true; if (currentAfplay) { try { currentAfplay.kill('SIGKILL'); } catch (_) {} }  // 立刻掐掉正在播 / 正在合成的语音（SIGKILL 瞬停，不等优雅退出）
   // 还在思考（大脑没出结果、还没开口）→ 立刻取消这轮等待，马上把话筒还给你，别等它生成完
@@ -996,7 +1003,7 @@ async function handleUtterance(text, oneShot) {
     if (streamedThisTurn) {
       // ReAct 已经流式发过白/黑气泡 + 入朗读队列 → 不重复发 result,等朗读念完再把回合交回
       await drainTTS();
-      if (!turnAborted && toolUsedThisTurn) sayPet('', ST_HAPPY, 'clawd-happy.svg', 1600);   // 干完活开心一下
+      if (!turnAborted && toolUsedThisTurn) petHappy(1600);   // 干完活开心一下
     } else {
       // 没流式(coach / 错误 / 斜杠空回执 / 只用了工具没出文字)→ 一次性发 + 朗读
       if (reply) reply = applyPetMarkers(reply);   // 应用并抠掉 [[markers]]
@@ -1008,7 +1015,7 @@ async function handleUtterance(text, oneShot) {
         const spoken = spokenFrom(reply);
         if (isSlash) sayPet('', ST_IDLE, 'clawd-working-typing.svg', 1200);
         else if (errored) sayPet('', ST_ERR, 'clawd-dizzy.svg', SPEAK_MS);
-        else if (toolUsedThisTurn) sayPet('', ST_HAPPY, 'clawd-happy.svg', 1600);
+        else if (toolUsedThisTurn) petHappy(1600);
         else sayPet('', ST_IDLE, SPEAK_ANIM, SPEAK_MS);
         if (spoken && !isSlash) await speakTTS(spoken);
       }
@@ -1340,7 +1347,7 @@ function interruptBrain() {
       brainProc.stdin.write(JSON.stringify({ type: 'control_request', request_id: 'int_' + Date.now(), request: { subtype: 'interrupt' } }) + '\n');
     }
   } catch (_) {}
-  sayPet('', ST_IDLE, ALERT_ANIM, 900);   // 大感叹号惊吓(同点击打断)
+  petAlert();   // 大感叹号惊吓(同点击打断);mini 时用 mini-alert
   if (pending) { const p = pending; pending = null; clearTimeout(p.timer); try { p.resolve(''); } catch (_) {} }  // 别再等结果,马上把麦还给你
   console.log('  [barge] 干活中断(ESC)→ 轮到你说');
 }
@@ -1736,6 +1743,31 @@ controlServer.on('error', (e) => {
 controlServer.listen(CONTROL_PORT, '127.0.0.1', () => console.log(`[control] 控制端口 http://127.0.0.1:${CONTROL_PORT}  (/toggle /poke /model /mode /sessions /session/new /session/switch)`));
 
 // ───────────────────────── 启动 / 退出 ─────────────────────────
+// 启动加载态:桌宠持续【扫地】,直到各方就绪(大脑 brainProc + 本机 whisper 端口响应)再开心一下落回 idle。
+let _bootDone = false;
+function petBootLoading() { sayPet('', ST_WORK, 'clawd-working-sweeping.svg', 600000); }
+function petBootDone() {
+  if (_bootDone) return; _bootDone = true;
+  console.log('[boot] 各方就绪 → 就位');
+  if (!sessionActive) petHappy(1300);   // 没在会话才收尾(开心一下→idle;mini 时 mini-happy);已开会话别覆盖
+}
+function waitBootReady() {
+  const started = Date.now(), MAX = 45000;
+  const tick = () => {
+    if (_bootDone) return;
+    const elapsed = Date.now() - started, brainUp = !!brainProc;
+    if (elapsed > MAX) return petBootDone();                          // 兜底:最多扫 45s
+    if (STT !== 'local') { if (brainUp && elapsed > 2500) return petBootDone(); return void setTimeout(tick, 600); }
+    const probe = http.request({ host: '127.0.0.1', port: WHISPER_PORT, method: 'HEAD', timeout: 700 }, (res) => {
+      res.resume(); if (brainUp) petBootDone(); else setTimeout(tick, 600);   // whisper 端口已响应=模型加载好
+    });
+    probe.on('error', () => setTimeout(tick, 600));
+    probe.on('timeout', () => { try { probe.destroy(); } catch (_) {} });
+    probe.end();
+  };
+  tick();
+}
+petBootLoading();   // 一启动就扫地(clawd 已先于引擎起好,sayPet 能送达)
 bootSession();   // 接上次会话（有记录就 resume），否则全新开
 startWhisperServer();   // STT=local → 拉起常驻 whisper-server（模型只加载一次）
 console.log(STT === 'local' ? `[stt] 本机 whisper-server（${WHISPER_MODEL.split('/').pop()}，离线）` : '[stt] ElevenLabs Scribe（云端兜底）');
@@ -1746,6 +1778,7 @@ loadRuntimeConfig();              // 先恢复落盘的偏好(麦克风/音量/�
 try { spawn('pkill', ['-f', 'wake-listener.py']).on('error', () => {}); } catch (_) {}
 setTimeout(startIdleWake, 400);   // 等孤儿被收掉再起自己的边车
 startMusicWatch();                // 音乐联动(配了 App 才起;设置页/落盘的选择会被 loadRuntimeConfig 恢复)
+waitBootReady();                  // 各方就绪后,结束"扫地"加载态
 
 function shutdown() {
   console.log('\n  收尾…');

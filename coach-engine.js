@@ -720,9 +720,15 @@ function switchMode(mode, scenario) {
 async function handleUtterance(text, oneShot) {
   const hasImg = pendingImages.length > 0;        // 这一轮带粘贴的图片(纯图也放行,可多张)
   text = text || '';
-  // 隐藏/说话中 → 一律不处理。语音(oneShot)在暂停时不处理；打字即便暂停也允许发。
-  if (!sessionActive || speaking || panelHidden) return;
-  if (!hasImg && text.trim().length <= 1) return;
+  // 没开会话 / 正在说话 → 不处理。
+  if (!sessionActive || speaking) { console.log('[utter] 丢弃:sessionActive=' + sessionActive + ' speaking=' + speaking + '（没开/正在说话）'); return; }
+  // 面板"隐藏"时:语音(oneShot)是隐藏期残留,丢；但打字进来说明面板其实可见(否则你打不了字)→ 自愈引擎的隐藏标记,继续处理。
+  if (panelHidden) {
+    if (oneShot) { console.log('[utter] 丢弃:面板已隐藏(语音残留)'); return; }
+    console.log('[utter] 打字进来但 panelHidden=true → 自愈为可见,继续');
+    panelHidden = false;
+  }
+  if (!hasImg && text.trim().length <= 1) { console.log('[utter] 丢弃:文字太短且无图'); return; }
   if (oneShot && paused) return;
   const trimmed = text.trim();
   // 斜杠命令:/clear|/reset|/new → 本地清空开新会话(等价 Claude Code 的 /clear)。其它 /命令(/compact 等)透传给大脑。
@@ -1320,8 +1326,11 @@ const controlServer = http.createServer((req, res) => {
         const m = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i.exec(String(u || ''));
         if (m) pendingImages.push({ media_type: m[1], data: m[2] });
       }
+      console.log('[text] 收到 text=' + t.length + '字 images=' + pendingImages.length + ' | state sessionActive=' + sessionActive + ' speaking=' + speaking + ' panelHidden=' + panelHidden + ' paused=' + paused);
+      // 是否会被处理(打字态:panelHidden 会自愈,故不计入丢弃条件)。渲染端据此决定是否清空输入,避免"打了字没发出去还消失"。
+      const willProcess = sessionActive && !speaking && (pendingImages.length > 0 || String(t).trim().length > 1);
       if (t || pendingImages.length) { bumpIdle(); handleUtterance(String(t)); }   // 打字/图片 = 有操作，重置闲置计时
-      res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}');
+      res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: true, accepted: willProcess }));
     });
     return;
   }

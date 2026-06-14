@@ -6,6 +6,11 @@
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Node](https://img.shields.io/badge/node-%E2%89%A518.17-brightgreen)
 
+<p align="center">
+  <video src="https://github.com/XiaoChu-1208/claude-baby/raw/main/assets/demo.mp4" controls muted width="640"></video>
+</p>
+<p align="center"><sub>▶ Demo — if the player doesn't load inline, <a href="https://github.com/XiaoChu-1208/claude-baby/raw/main/assets/demo.mp4">watch it here</a>.</sub></p>
+
 It is **Claude Code you can talk to**. Instead of sitting in a terminal, you keep working; the pet listens in the background, jumps out when called, does the task, and tells you when it is done — then gets out of your way.
 
 > ### 🙏 Built on Clawd on Desk

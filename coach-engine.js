@@ -26,14 +26,14 @@ const PROXY = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.
 if (PROXY) setGlobalDispatcher(new ProxyAgent(PROXY)); // 给 fetch(ElevenLabs) 用
 
 let MIC = process.env.MIC_DEVICE || ':1';            // avfoundation 设备索引（:1 = MacBook 麦克风）；设置页可切，故为 let
-const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || '';
+let ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || '';   // 运行时可被设置页 /config 覆盖(没填则保持 .env)
 // ── 语音转文字后端：local=本机 whisper.cpp（离线免费，装了模型就自动用）；scribe=ElevenLabs 兜底。
 const WHISPER_SERVER_BIN = process.env.COACH_WHISPER_SERVER_BIN || 'whisper-server';   // 常驻服务，模型只加载一次
 const WHISPER_MODEL = process.env.COACH_WHISPER_MODEL || join(homedir(), '.whisper-models', 'ggml-large-v3-turbo.bin');
 const WHISPER_LANG = process.env.COACH_WHISPER_LANG || 'auto';   // auto 自动认中英；也可设 en / zh
 const WHISPER_PORT = Number(process.env.COACH_WHISPER_PORT || 8910);
 const STT = (process.env.COACH_STT || (existsSync(WHISPER_MODEL) ? 'local' : 'scribe')).toLowerCase();
-const VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'OlIwv2Z2NHmIfMaCuQHJ';
+let VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'OlIwv2Z2NHmIfMaCuQHJ';   // 运行时可被设置页「切换音色」覆盖
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 const CONTROL_PORT = Number(process.env.COACH_CONTROL_PORT || 23390);
 
@@ -1472,6 +1472,7 @@ function saveRuntimeConfig() {
       bargeVoice: BARGE_VOICE, bargeRms: BARGE_RMS, bargeSustainMs: BARGE_SUSTAIN_MS,
       knock: KNOCK_ENABLED, wake: WAKE_ENABLED, wakeThreshold: WAKE_THRESHOLD,
       musicApp: MUSIC_APP,
+      voiceId: VOICE_ID, elevenApiKey: ELEVENLABS_API_KEY,   // 音色 ID + key(设置页改过就持久化,重启不用再填)
     }));
   } catch (_) {}
 }
@@ -1489,6 +1490,8 @@ function loadRuntimeConfig() {
   if (typeof s.wake === 'boolean') WAKE_ENABLED = s.wake;
   if (Number.isFinite(s.wakeThreshold)) { WAKE_THRESHOLD = s.wakeThreshold; process.env.COACH_WAKE_THRESHOLD = String(s.wakeThreshold); }
   if (typeof s.musicApp === 'string') MUSIC_APP = s.musicApp;
+  if (typeof s.voiceId === 'string' && s.voiceId) VOICE_ID = s.voiceId;
+  if (typeof s.elevenApiKey === 'string' && s.elevenApiKey) ELEVENLABS_API_KEY = s.elevenApiKey;
   console.log('[config] 已恢复偏好:' + CONFIG_FILE);
 }
 // 当前可调配置快照(给设置页渲染)。
@@ -1499,6 +1502,7 @@ function getConfig() {
     bargeVoice: BARGE_VOICE, bargeRms: BARGE_RMS, bargeSustainMs: BARGE_SUSTAIN_MS,
     knock: KNOCK_ENABLED, wake: WAKE_ENABLED, wakeThreshold: WAKE_THRESHOLD,
     musicApp: MUSIC_APP,
+    elevenVoiceId: VOICE_ID, hasElevenKey: !!ELEVENLABS_API_KEY,   // 设置页预填音色 ID;key 只回 bool(不外泄明文)
   };
 }
 // 应用配置(只动传进来的字段;布尔=开关,数值带范围夹取)。
@@ -1529,7 +1533,10 @@ function applyConfig(c) {
     else { vw.stop(); if (KNOCK_ENABLED && (!sessionActive || panelHidden)) startKnockListener(); }
   }
   if ('musicApp' in c) { MUSIC_APP = String(c.musicApp || '').trim(); startMusicWatch(); }
-  console.log('  [config] 更新', JSON.stringify(c));
+  // 设置页「切换音色」：换 Voice ID 立即生效;API key 留空则沿用现有(.env / 已存)，不被空串清掉(解决「.env 已有还要重填」)
+  if ('elevenVoiceId' in c && typeof c.elevenVoiceId === 'string' && c.elevenVoiceId.trim()) VOICE_ID = c.elevenVoiceId.trim();
+  if ('elevenApiKey' in c && typeof c.elevenApiKey === 'string' && c.elevenApiKey.trim()) ELEVENLABS_API_KEY = c.elevenApiKey.trim();
+  console.log('  [config] 更新', JSON.stringify({ ...c, elevenApiKey: c.elevenApiKey ? '***' : undefined }));
   saveRuntimeConfig();   // 落盘 → 重启自动恢复
   petAck();              // 设置生效 → 桌宠反应一下
   return getConfig();
@@ -1614,9 +1621,27 @@ const controlServer = http.createServer((req, res) => {
         if (m) pendingImages.push({ media_type: m[1], data: m[2] });
       }
       console.log('[text] 收到 text=' + t.length + '字 images=' + pendingImages.length + ' | state sessionActive=' + sessionActive + ' speaking=' + speaking + ' panelHidden=' + panelHidden + ' paused=' + paused);
-      // 是否会被处理(打字态:panelHidden 会自愈,故不计入丢弃条件)。渲染端据此决定是否清空输入,避免"打了字没发出去还消失"。
-      const willProcess = sessionActive && !speaking && (pendingImages.length > 0 || String(t).trim().length > 1);
-      if (t || pendingImages.length) { bumpIdle(); handleUtterance(String(t)); }   // 打字/图片 = 有操作，重置闲置计时
+      // 渲染端据此决定是否清空输入,避免"打了字没发出去还消失"。
+      // #8 修复:不再因 speaking 就判 false 丢弃 —— 你主动打字/粘贴时它在说/想,改为【打断当前轮再处理】,所以一律受理。
+      const hasContent = pendingImages.length > 0 || String(t).trim().length > 1;
+      const willProcess = sessionActive && hasContent;
+      if (hasContent) {
+        bumpIdle();                                       // 打字/图片 = 有操作,重置闲置计时
+        if (speaking) {
+          // 它正在说话/思考 → 别静默丢弃(原 line 896 的坑):打断当前轮,等收尾(resumeListen 把 speaking 落回 false)后处理这条
+          console.log('[text] 命中 speaking → 打断当前轮,稍后处理这条打字/粘贴');
+          const q = { text: String(t), images: pendingImages.slice() };
+          doBarge();
+          let tries = 0;
+          const run = () => {
+            if (speaking && tries++ < 100) { setTimeout(run, 30); return; }   // 等当前轮收尾,最多 ~3s 兜底
+            pendingImages = q.images; handleUtterance(q.text);
+          };
+          setTimeout(run, 30);
+        } else {
+          handleUtterance(String(t));
+        }
+      }
       res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: true, accepted: willProcess }));
     });
     return;

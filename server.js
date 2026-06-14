@@ -126,7 +126,7 @@ function ensureBrain(scenario, model) {
   if (!brainProc || brainKey !== `${scenario}|${model}`) startBrain(scenario, model);
 }
 
-// ---- 系统提示：商务英语陪练。base + 场景。回复强制 1–3 句口语化。----
+// ---- coach 模式系统提示：商务英语对话。base + 场景。回复强制 1–3 句口语化。----
 const BASE_SYSTEM = `You are a warm business-English speaking partner helping me prepare for a workplace English exam. Default to English. Keep every reply very short — 1 to 2 sentences, usually under 25 words — and end most turns with one short follow-up question. Brevity matters: this is fast back-and-forth speaking practice, not a monologue. Play your role naturally.
 
 IMPORTANT — mirror my language: if I write in Chinese (which happens when I'm stuck or asking for help because my English isn't fluent yet), reply in Chinese so I'm sure to understand. Keep it short, answer what I asked, then gently invite me back to English. Never refuse to use Chinese or insist on English-only — being understood matters more than staying in English.
@@ -153,7 +153,7 @@ function buildSystem(scenario) {
 // ============ 桌宠联动：把 AI 回复推给 clawd 桌宠（说话气泡 + 语义动画）============
 // clawd-on-desk 跑在本机 127.0.0.1，端口写在 ~/.clawd/runtime.json（默认 23333）。
 // 用 Node 原生 http 直连本地，绕开上面 setGlobalDispatcher 的代理；fire-and-forget，
-// clawd 没开也不影响陪练。设 PET=0 可整体关闭联动。
+// clawd 没开也不影响对话。设 PET=0 可整体关闭联动。
 const PET_ENABLED = process.env.PET !== '0';
 
 function clawdPort() {
@@ -311,7 +311,7 @@ app.post('/api/stt', express.raw({ type: () => true, limit: '25mb' }), async (re
 const PORT = process.env.PORT || 5178;
 app.listen(PORT, () => {
   const url = `http://localhost:${PORT}`;
-  console.log(`\n  英语口语陪练 → ${url}\n`);
+  console.log(`\n  Claude Baby → ${url}\n`);
   // 自动开 Chrome（Web Speech 需要 Chrome；设 OPEN=0 可关掉）
   if (process.env.OPEN !== '0') {
     const opener = spawn('open', ['-a', 'Google Chrome', url], { stdio: 'ignore' });

@@ -1,4 +1,4 @@
-// coach-engine.js — 无头语音陪练引擎（给 clawd-on-desk 桌宠用）
+// coach-engine.js — Claude Baby 的大脑：无头语音 agent 引擎（给 clawd-on-desk 桌宠用）
 //
 //   ffmpeg 抓麦(avfoundation) → ElevenLabs Scribe 整段转写(VAD 断句后送)
 //   → 常驻 claude(吃订阅) → ElevenLabs 发声(afplay 播)
@@ -41,7 +41,7 @@ const CONTROL_PORT = Number(process.env.COACH_CONTROL_PORT || 23390);
 const WORKDIR = process.env.COACH_WORKDIR || join(homedir(), 'Desktop', '同步');
 // ── 模型：默认 haiku 求快；对话里可切 sonnet / opus。CLI 直接吃这些别名。
 const MODELS = new Set(['haiku', 'sonnet', 'opus']);
-// ── 模式：agent=通用助手(开全工具、能干活、默认)；coach=英语陪练(关工具、强口语、原玩法)。
+// ── 模式：agent=通用助手(开全工具、能干活、默认)；coach=纯对话模式(关工具、强口语、原玩法)。
 const MODES = new Set(['agent', 'coach']);
 
 // 可变运行态（对话里能切）
@@ -53,7 +53,7 @@ if (!ELEVENLABS_API_KEY) console.warn('[warn] 缺 ELEVENLABS_API_KEY（语音会
 console.log(`[engine] mode=${currentMode}  model=${currentModel}  workdir=${WORKDIR}`);
 console.log(`[engine] mic=${MIC}  voice=${VOICE_ID}  proxy=${PROXY || '(无)'}`);
 
-// ───────────────────────── 系统提示（商务英语陪练，双语兜底）─────────────────────────
+// ───────────────────────── coach 模式系统提示（商务英语对话，双语兜底）─────────────────────────
 const BASE_SYSTEM = `You are a warm business-English speaking partner helping me prepare for a workplace English exam. Default to English. Keep every reply very short — 1 to 2 sentences, usually under 25 words — and end most turns with one short follow-up question. Brevity matters: this is fast back-and-forth speaking practice, not a monologue. Play your role naturally.
 
 IMPORTANT — mirror my language: if I speak Chinese (which happens when I'm stuck or asking for help because my English isn't fluent yet), reply in Chinese so I'm sure to understand. Keep it short, then gently invite me back to English. Never refuse Chinese — being understood matters more than staying in English.
@@ -1046,7 +1046,7 @@ async function startSession() {
     sayPet('', ST_THINK);   // 开场白期间 → 思考动画
     try {
       if (currentMode === 'coach') {
-        const hi = await ask(COACH_OPENER);  // 陪练：让 AI 先用英语开场
+        const hi = await ask(COACH_OPENER);  // coach 模式：让 AI 先用英语开场
         if (hi && sessionActive) { console.log(`  Coach: ${hi}`); recordTurn('coach', hi); chat({ type: 'add', role: 'coach', text: hi }); sayPet('', ST_IDLE, SPEAK_ANIM, SPEAK_MS); await speakTTS(hi); }
       } else {
         // agent：不调模型，本地一句问候（省延迟），直接进入待命

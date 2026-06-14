@@ -37,6 +37,7 @@ free_port() {
 
 echo "==> Stopping any old instances..."
 pkill -9 -f "clawd-on-desk/node_modules/electron" 2>/dev/null
+pkill -f "wake-listener.py" 2>/dev/null   # kill orphaned wake-word sidecars from a previous run
 free_port || { echo "Error: port $PORT won't free up; inspect with: lsof -nP -iTCP:$PORT"; exit 1; }
 sleep 1
 

@@ -25,7 +25,7 @@ const directAgent = new Agent();   // 直连(不走代理)：打本机 whisper-s
 const PROXY = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.ALL_PROXY || '';
 if (PROXY) setGlobalDispatcher(new ProxyAgent(PROXY)); // 给 fetch(ElevenLabs) 用
 
-const MIC = process.env.MIC_DEVICE || ':1';          // avfoundation 设备索引（:1 = MacBook 麦克风）
+let MIC = process.env.MIC_DEVICE || ':1';            // avfoundation 设备索引（:1 = MacBook 麦克风）；设置页可切，故为 let
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || '';
 // ── 语音转文字后端：local=本机 whisper.cpp（离线免费，装了模型就自动用）；scribe=ElevenLabs 兜底。
 const WHISPER_SERVER_BIN = process.env.COACH_WHISPER_SERVER_BIN || 'whisper-server';   // 常驻服务，模型只加载一次
@@ -448,7 +448,7 @@ function applyPetMarkers(text) {
 // ───────────────────────── ElevenLabs 发声（ffmpeg 加电话失真 → afplay 播）─────────────────────────
 // 声音过一层「电话/对讲机」效果：带通 350–3400Hz 砍掉高低频 + 轻 bitcrush 失真 + 推一点过载。
 // 默认开；COACH_VOICE_FX=0 关；COACH_VOICE_FX_FILTER 自定义 ffmpeg 滤镜串。
-const VOICE_FX = process.env.COACH_VOICE_FX !== '0';
+let VOICE_FX = process.env.COACH_VOICE_FX !== '0';
 // filter_complex：人声走电话带通+轻 bitcrush（电子/对讲机感），不混底噪。
 // [0:a]=TTS 人声；带通 350–3400Hz + acrusher 轻失真 + 过载 → 限幅收尾。
 const VOICE_FX_COMPLEX = process.env.COACH_VOICE_FX_COMPLEX ||
@@ -1007,7 +1007,7 @@ function stopMic() { if (mic) { try { mic.kill('SIGKILL'); } catch (_) {} mic = 
 // 现代 Mac 没有可用震动传感器,靠麦克风听「短促高幅脉冲」。两次脉冲间隔落在窗口内 → 拉起会话。
 // 跟 Scribe 麦克风互斥(只在 !sessionActive 时跑),不抢设备。阈值可用环境变量调:
 //   太吵误触 → 调高 COACH_KNOCK_GATE；敲了没反应 → 调低 GATE 或放宽 COACH_KNOCK_MAX_GAP。
-const KNOCK_ENABLED = process.env.COACH_KNOCK !== '0';
+let KNOCK_ENABLED = process.env.COACH_KNOCK !== '0';
 const KNOCK_GATE = Number(process.env.COACH_KNOCK_GATE || 0.15);       // 触发脉冲的峰值门(峰值法;敲击尖峰通常 0.3+)
 const KNOCK_RELEASE = Number(process.env.COACH_KNOCK_RELEASE || 0.07); // 峰值回落到此以下才重新武装(防一声长响被当多敲)
 const KNOCK_MIN_GAP = Number(process.env.COACH_KNOCK_MIN_GAP || 90);   // 相邻两敲最小间隔(ms)
@@ -1059,12 +1059,16 @@ function getVoiceWake() {
     voiceWake = createVoiceWake({
       onDown: () => { if (!sessionActive || panelHidden) startKnockListener(); },  // 边车挂了 → 回退敲两下
     });
-  } catch (_) { voiceWake = { start: () => false, stop: () => {} }; }
+    voiceWake.setEnabled(WAKE_ENABLED);   // 与运行时开关同步
+  } catch (_) { voiceWake = { start: () => false, stop: () => {}, restart: () => false, setEnabled: () => {}, isEnabled: () => false }; }
   return voiceWake;
 }
 // 敲醒 / 喊醒 → 直接进【录音】态：强制清掉暂停和「上轮打字」，让 resumeListen 开麦倾听，
 // 不要给灰色 type-only。（双击显示不走这里，仍保留暂停粘性。）
 function wakeToRecording(conf = 1, rms = 0) {
+  const now = Date.now();
+  if (now - lastWakeAt < WAKE_COOLDOWN_MS) { console.log('[wake] 冷却中(' + (now - lastWakeAt) + 'ms) → 忽略重复触发'); return; }
+  lastWakeAt = now;
   if (speaking) {   // 它在说话/思考 → 打断不再靠喊词(改由主麦音量监听 bargeWatch:你一开口就打断)。这里忽略喊词,避免它念到"claude"自触发。
     console.log('[wake] 说话中收到喊词 → 忽略(打断已改为:你开口说话即打断)');
     return;
@@ -1075,18 +1079,25 @@ function wakeToRecording(conf = 1, rms = 0) {
   sayPet('', ST_HAPPY, 'clawd-wake.svg', 1300);   // 喊到了 → 桌宠先"跳出来"反应一下,再起/显示会话
   if (!sessionActive) { console.log('[wake] 唤醒 → 起会话(录音)'); startSession(); }
   else if (panelHidden) { console.log('[wake] 唤醒 → 显示会话 + 录音'); showPanel(); }
-  else if (wasPaused) { console.log('[wake] 已显示但暂停中 → 喊 Claude 直接开录音'); resumeListen(); }   // 显示+暂停 → 开麦
+  // 显示着、没隐藏:暂停中 或 正在打字预备(点了输入框、/mic-off 关了麦、forwarding=false)→ 喊 Claude 立刻转为录音说话(说完照常发送)。
+  else if (wasPaused || !forwarding) { console.log('[wake] 已显示但没在录音(暂停/打字预备)→ 喊 Claude 切回录音'); resumeListen(); }
 }
 // 喊词打断:开(默认)→ 唤醒边车在会话期间也常驻,Claude 说话时喊 Claude 能打断(wakeToRecording→doBarge)。
 // 代价:边车和主麦(Scribe)同时占麦;macOS 一般允许共享,若开了之后发现"说话听不见了"(主麦抢不到),
 // 就在 .env 设 COACH_WAKE_BARGE=0 关掉(那样只在空闲/隐藏时听唤醒,说话时不能喊断)。
 const WAKE_BARGE = process.env.COACH_WAKE_BARGE !== '0';
 // 语音打断总开关:默认开。它说话/思考时你一开口就掐掉它、轮到你说。不想要(只留单击)→ COACH_BARGE_VOICE=0。
-const BARGE_VOICE = process.env.COACH_BARGE_VOICE !== '0';
+let BARGE_VOICE = process.env.COACH_BARGE_VOICE !== '0';
 // 打断判据=你主麦的音量(归一化 RMS 0..1),不再靠喊"Claude"(长篇 TTS 会盖住你、且它念到 claude 会自触发)。
 // 你说话超过这个门槛、且连续 BARGE_SUSTAIN_MS 毫秒 → 打断。外放回声会垫高底噪:自打断就调高门槛,打不断就调低。
-const BARGE_RMS = Number(process.env.COACH_BARGE_RMS || 0.06);
-const BARGE_SUSTAIN_MS = Number(process.env.COACH_BARGE_SUSTAIN_MS || 110);
+let BARGE_RMS = Number(process.env.COACH_BARGE_RMS || 0.06);
+let BARGE_SUSTAIN_MS = Number(process.env.COACH_BARGE_SUSTAIN_MS || 110);
+// 喊词唤醒开关 + 命中阈值(设置页可调;阈值改后重拉边车生效)。
+let WAKE_ENABLED = process.env.COACH_WAKE === '1';
+let WAKE_THRESHOLD = Number(process.env.COACH_WAKE_THRESHOLD || 0.65);
+// 唤醒冷却:多个边车/连续命中时,这段时间内的重复 /wake 全忽略,防"一喊连触发两三次"(动画头几帧重播+多个音效叠放)。
+let lastWakeAt = 0;
+const WAKE_COOLDOWN_MS = Number(process.env.COACH_WAKE_COOLDOWN_MS || 1500);
 let _bargeBytes = 0;   // 连续超过门槛的累计字节(16k 单声道 s16le:每毫秒 32 字节);中断即清零,必须"持续"才算你真在说
 function bargeWatch(chunk) {   // 在它说话期间被主麦数据回调调用
   if (!BARGE_VOICE || !speaking) return;
@@ -1159,7 +1170,107 @@ function bumpIdle() {
     }, 850);
   }, IDLE_HIDE_MS);
 }
+// ───────────────────────── 设置页:麦克风 + 会话 + 运行时配置 ─────────────────────────
+// 列出 avfoundation 音频输入设备(ffmpeg 把设备清单打到 stderr,正常会非零退出)。返回 [{index,name}]。
+function listMics() {
+  return new Promise((resolve) => {
+    let err = '';
+    const ff = spawn('ffmpeg', ['-hide_banner', '-f', 'avfoundation', '-list_devices', 'true', '-i', '']);
+    ff.stderr.on('data', (d) => { err += d.toString(); });
+    ff.on('error', () => resolve([]));
+    ff.on('exit', () => {
+      const out = []; let inAudio = false;
+      for (const line of err.split('\n')) {
+        if (/AVFoundation audio devices/i.test(line)) { inAudio = true; continue; }
+        if (/AVFoundation video devices/i.test(line)) { inAudio = false; continue; }
+        if (!inAudio) continue;
+        const m = line.match(/\]\s*\[(\d+)\]\s+(.+?)\s*$/);
+        if (m) out.push({ index: Number(m[1]), name: m[2].trim() });
+      }
+      resolve(out);
+    });
+  });
+}
+// 切麦克风:device 形如 ":1"(只取音频 index)。换设备 → 重启在用的主麦 / 敲击监听(都用 MIC)。
+function applyMic(device) {
+  const d = String(device || '').trim();
+  if (!d) return false;
+  MIC = d.startsWith(':') ? d : (':' + d.replace(/[^0-9]/g, ''));
+  const wasRec = !!mic; stopMic();
+  if (wasRec) startMic();                                  // 之前在录就接着录(新设备)
+  if (knockMic) { stopKnockListener(); startKnockListener(); }
+  console.log('  [mic] 切到设备', MIC);
+  return true;
+}
+// 按 id 重命名任意会话:当前会话走 renameSession;其它会话直接改盘上 json。
+function renameSessionById(id, title) {
+  const t = String(title || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  if (!id || id === currentSessionId) { renameSession(t); return true; }
+  const data = loadSessionData(id); if (!data) return false;
+  data.title = t || ((data.messages || []).find((m) => m.role === 'user')?.text || '会话').slice(0, 24);
+  try { writeFileSync(sessFile(id), JSON.stringify(data)); } catch (_) { return false; }
+  console.log('  [session] 重命名', id, '→', data.title);
+  return true;
+}
+// 删除任意会话:当前会话走 closeSession(删盘+开新空会话);其它会话直接删文件。
+function deleteSessionById(id) {
+  if (!id) return false;
+  if (id === currentSessionId) return closeSession();
+  try { rmSync(sessFile(id), { force: true }); } catch (_) { return false; }
+  console.log('  [session] 删除', id);
+  return true;
+}
+// 当前可调配置快照(给设置页渲染)。
+function getConfig() {
+  return {
+    mic: MIC, model: currentModel, mode: currentMode, scenario: currentScenario,
+    volume: ttsVolume, voiceFx: VOICE_FX,
+    bargeVoice: BARGE_VOICE, bargeRms: BARGE_RMS, bargeSustainMs: BARGE_SUSTAIN_MS,
+    knock: KNOCK_ENABLED, wake: WAKE_ENABLED, wakeThreshold: WAKE_THRESHOLD,
+  };
+}
+// 应用配置(只动传进来的字段;布尔=开关,数值带范围夹取)。
+function applyConfig(c) {
+  if (!c || typeof c !== 'object') return getConfig();
+  const num = (v, lo, hi, d) => { const n = Number(v); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
+  if ('volume' in c) ttsVolume = num(c.volume, 0, 1, ttsVolume);
+  if ('voiceFx' in c) VOICE_FX = !!c.voiceFx;
+  if ('bargeVoice' in c) BARGE_VOICE = !!c.bargeVoice;
+  if ('bargeRms' in c) BARGE_RMS = num(c.bargeRms, 0.01, 0.3, BARGE_RMS);
+  if ('bargeSustainMs' in c) BARGE_SUSTAIN_MS = num(c.bargeSustainMs, 30, 1000, BARGE_SUSTAIN_MS);
+  if ('model' in c && MODELS.has(c.model)) switchModel(c.model);
+  if ('mode' in c && MODES.has(c.mode)) switchMode(c.mode, c.scenario);
+  if ('knock' in c) {
+    KNOCK_ENABLED = !!c.knock;
+    if (!KNOCK_ENABLED) stopKnockListener();
+    else if ((!sessionActive || panelHidden) && !getVoiceWake().isEnabled()) startKnockListener();
+  }
+  if ('wakeThreshold' in c) {
+    WAKE_THRESHOLD = num(c.wakeThreshold, 0.3, 0.95, WAKE_THRESHOLD);
+    process.env.COACH_WAKE_THRESHOLD = String(WAKE_THRESHOLD);
+    if (getVoiceWake().isEnabled()) getVoiceWake().restart();   // 重拉边车让新阈值生效
+  }
+  if ('wake' in c) {
+    WAKE_ENABLED = !!c.wake;
+    const vw = getVoiceWake(); vw.setEnabled(WAKE_ENABLED);
+    if (WAKE_ENABLED) { stopKnockListener(); vw.start(); }       // 开喊词 → 收掉敲击,起边车
+    else { vw.stop(); if (KNOCK_ENABLED && (!sessionActive || panelHidden)) startKnockListener(); }
+  }
+  console.log('  [config] 更新', JSON.stringify(c));
+  return getConfig();
+}
+
 const controlServer = http.createServer((req, res) => {
+  // ── 设置页:GET 读配置 / 麦克风列表 ──
+  if (req.method === 'GET' && req.url === '/config') {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, config: getConfig(), current: currentSessionId, sessions: listSessions(50) }));
+    return;
+  }
+  if (req.method === 'GET' && req.url === '/mics') {
+    listMics().then((mics) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: true, mics, current: MIC })); });
+    return;
+  }
   if (req.method === 'POST' && req.url === '/text') {           // 打字输入（聊天栏回车）
     let b = ''; req.on('data', (c) => { b += c; if (b.length > 8192) req.destroy(); });
     req.on('end', () => {
@@ -1183,6 +1294,36 @@ const controlServer = http.createServer((req, res) => {
       const okk = id ? switchSession(id) : false;
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ ok: okk, current: currentSessionId, sessions: listSessions() }));
+    });
+    return;
+  }
+  if (req.method === 'POST' && (req.url === '/session/rename' || req.url === '/session/delete')) {  // 设置页:改名 / 删除任意会话
+    let b = ''; req.on('data', (c) => { b += c; if (b.length > 4096) req.destroy(); });
+    req.on('end', () => {
+      let j = {}; try { j = JSON.parse(b || '{}'); } catch (_) {}
+      const okk = req.url === '/session/rename' ? renameSessionById(j.id, j.title) : deleteSessionById(j.id);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: !!okk, current: currentSessionId, sessions: listSessions(50) }));
+    });
+    return;
+  }
+  if (req.method === 'POST' && req.url === '/config') {                            // 设置页:批量改运行时配置
+    let b = ''; req.on('data', (c) => { b += c; if (b.length > 4096) req.destroy(); });
+    req.on('end', () => {
+      let j = {}; try { j = JSON.parse(b || '{}'); } catch (_) {}
+      const cfg = applyConfig(j);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, config: cfg }));
+    });
+    return;
+  }
+  if (req.method === 'POST' && req.url === '/mic') {                               // 设置页:切麦克风
+    let b = ''; req.on('data', (c) => { b += c; if (b.length > 1024) req.destroy(); });
+    req.on('end', () => {
+      let d = ''; try { d = JSON.parse(b || '{}').device || ''; } catch (_) {}
+      const okk = applyMic(d);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: okk, mic: MIC }));
     });
     return;
   }
@@ -1265,13 +1406,17 @@ startWhisperServer();   // STT=local → 拉起常驻 whisper-server（模型只
 console.log(STT === 'local' ? `[stt] 本机 whisper-server（${WHISPER_MODEL.split('/').pop()}，离线）` : '[stt] ElevenLabs Scribe（云端兜底）');
 // boot 是空闲态(无会话):不空跑 Scribe 麦,改进入空闲唤醒(声纹优先,敲两下兜底)。
 // 会话一开 startSession() 会 stopIdleWake() 并由 resumeListen() 接管 Scribe 麦。
-startIdleWake();
+// 先清掉上一轮引擎被 kill -9 后遗留的孤儿唤醒边车(否则多个边车同时上报 /wake → 一喊连触发两三次)。
+try { spawn('pkill', ['-f', 'wake-listener.py']).on('error', () => {}); } catch (_) {}
+setTimeout(startIdleWake, 400);   // 等孤儿被收掉再起自己的边车
 
 function shutdown() {
   console.log('\n  收尾…');
   try { if (mic) mic.kill('SIGKILL'); } catch (_) {}
   try { if (currentAfplay) currentAfplay.kill(); } catch (_) {}
   try { if (whisperProc) whisperProc.kill('SIGKILL'); } catch (_) {}   // 收掉常驻 whisper-server
+  try { getVoiceWake().stop(); } catch (_) {}                          // 收掉唤醒边车,别留孤儿
+  try { stopKnockListener(); } catch (_) {}
   killBrain();
   process.exit(0);
 }

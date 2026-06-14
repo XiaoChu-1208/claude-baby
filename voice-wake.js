@@ -23,9 +23,13 @@ export function createVoiceWake(opts = {}) {
   } = opts;
 
   let proc = null, startedAt = 0;
+  let on = enabled;                                     // 运行时可改（设置页切换喊词唤醒）
+
+  function setEnabled(v) { on = !!v; }
+  function isEnabled() { return on; }
 
   function start() {
-    if (!enabled) return false;                         // 没开 → 让位给敲两下
+    if (!on) return false;                              // 没开 → 让位给敲两下
     if (proc) return true;
     if (!fs.existsSync(script)) { log('[wake] 缺 wake-listener.py → 回退敲两下'); return false; }
     try {
@@ -42,6 +46,7 @@ export function createVoiceWake(opts = {}) {
   }
 
   function stop() { if (proc) { try { proc.kill('SIGKILL'); } catch (_) {} proc = null; } }
+  function restart() { stop(); return start(); }   // 改了阈值(env)后重拉,让新阈值生效
 
-  return { start, stop };
+  return { start, stop, restart, setEnabled, isEnabled };
 }

@@ -11,11 +11,11 @@
     <img src="https://github.com/XiaoChu-1208/claude-baby/raw/main/assets/demo.gif" width="520" alt="Claude Baby demo: talking to the desktop pet, which runs Claude Code and replies by voice">
   </a>
 </p>
-<p align="center"><sub>▶ Click the GIF to watch the full video with sound.</sub></p>
+<p align="center"><sub>Click the GIF to watch the full video with sound.</sub></p>
 
 It is **Claude Code you can talk to**. Instead of sitting in a terminal, you keep working; the pet listens in the background, jumps out when called, does the task, and tells you when it is done — then gets out of your way.
 
-> ### 🙏 Built on Clawd on Desk
+> ### Built on Clawd on Desk
 > Claude Baby would not exist without **[Clawd on Desk](https://github.com/rullerzhou-afk/clawd-on-desk)** by **[@rullerzhou-afk](https://github.com/rullerzhou-afk)** — the wonderful open-source desktop pet that reacts to your AI coding agent in real time. Claude Baby reuses that pet as its body and adds a voice-driven agent brain on top. Huge thanks to the original author and contributors. See [Claude Baby vs Clawd on Desk](#claude-baby-vs-clawd-on-desk) for how they differ and which to choose.
 
 - **This repo (the "brain"):** https://github.com/XiaoChu-1208/claude-baby
@@ -26,18 +26,19 @@ It is **Claude Code you can talk to**. Instead of sitting in a terminal, you kee
 ## Table of contents
 
 1. [What is Claude Baby?](#what-is-claude-baby)
-2. [Claude Baby vs Clawd on Desk](#claude-baby-vs-clawd-on-desk)
-3. [Features](#features)
-4. [How it works](#how-it-works)
-5. [Requirements & supported conditions](#requirements--supported-conditions)
-6. [Getting started (step by step)](#getting-started-step-by-step)
-7. [Configuration reference (`.env`)](#configuration-reference-env)
-8. [Usage](#usage)
-9. [Voice pipeline (STT / TTS / wake word)](#voice-pipeline-stt--tts--wake-word)
-10. [Troubleshooting](#troubleshooting)
-11. [FAQ](#faq)
-12. [Privacy & data](#privacy--data)
-13. [License](#license)
+2. [More than a smart speaker](#more-than-a-smart-speaker)
+3. [Claude Baby vs Clawd on Desk](#claude-baby-vs-clawd-on-desk)
+4. [Features](#features)
+5. [How it works](#how-it-works)
+6. [Requirements & supported conditions](#requirements--supported-conditions)
+7. [Getting started (step by step)](#getting-started-step-by-step)
+8. [Configuration reference (`.env`)](#configuration-reference-env)
+9. [Usage](#usage)
+10. [Voice pipeline (STT / TTS / wake word)](#voice-pipeline-stt--tts--wake-word)
+11. [Troubleshooting](#troubleshooting)
+12. [FAQ](#faq)
+13. [Privacy & data](#privacy--data)
+14. [License](#license)
 
 ---
 
@@ -48,6 +49,33 @@ Claude Baby is a **voice-driven agent built on Claude Code**. A pixel pet sits o
 It is **not** a thin chatbot over the Anthropic API. It drives the real Claude Code CLI, so it has the same tools, skills, and agentic abilities you already use — and it bills against your **Claude subscription**, not API credits.
 
 **Good for:** quick coding and file edits, running commands, codebase questions, web research, and any "just do this for me" task you'd rather speak than type.
+
+---
+
+## More than a smart speaker
+
+> One night I shut my laptop lid, lay down in bed, said **"Claude"**, and asked it to find some music and play it on the computer. It did. A smart speaker could do that too — but this wasn't a smart speaker. It was a general coding agent that figured out, on the fly, how to locate the track and play it through the machine. That is the uncanny part: you are not triggering a pre-built skill, you are talking to a computer that can do *anything a computer can do*.
+
+A smart speaker ships a fixed catalog of intents — timers, weather, a handful of music services. **Claude Baby is Claude Code with a voice**, so it has a shell, your tools, your skills, and the web. "Play some music" is not a hardcoded feature; it's the agent using `Bash` and friends to find and play audio. The very same voice can also say:
+
+- "Summarize what changed in this repo today."
+- "Rename these 200 files to a consistent pattern."
+- "Open the staging site and tell me if the build looks broken."
+- "Draft a reply to the last email and read it back to me."
+
+Anything you would type into Claude Code, you can now **say out loud** — from across the room, with no keyboard and no screen. Claude Code already can drive your whole machine; Claude Baby just removes your hands and eyes from the loop.
+
+### Tip: run it hands-free with the lid closed
+
+You can leave the Mac listening from your nightstand, a shelf, or inside a bag:
+
+1. **Keep the Mac awake with the lid shut.** Use [Amphetamine](https://apps.apple.com/app/amphetamine/id937984704) (free) and enable "allow when display is closed" (clamshell / closed-display mode). The machine keeps running and listening with the lid down.
+2. **Use an external microphone — this is required.** macOS disables the **built-in** mic in clamshell mode, so pair AirPods or a Bluetooth/USB mic and point Claude Baby at it via `MIC_DEVICE` (use the device *name*, not an index). Audio out can be any speaker or headphones.
+3. **Enable the wake word** (`COACH_WAKE=1`) so you can summon it without touching anything — just say "Claude".
+
+The result is a no-screen, no-keyboard computer you talk to like a person: wake it by name, speak the task, hear the answer.
+
+> Note: in `agent` mode it runs with auto-approved tools (`bypassPermissions`) — it will run commands and edit files in your working directory without asking. Point `COACH_WORKDIR` somewhere you're comfortable letting it act, especially when you're operating it from across the room.
 
 ---
 
@@ -131,7 +159,23 @@ You also need:
 
 ## Getting started (step by step)
 
-Follow these in order. **Steps 1–6 are required; 7–9 are optional.**
+### Fastest path: one command
+
+After cloning this repo, let the installer set up every dependency for you:
+
+```bash
+git clone https://github.com/XiaoChu-1208/claude-baby.git
+cd claude-baby
+./setup.sh            # interactive; installs required + asks about optional parts
+# or: ./setup.sh --all       (accept everything, including the ~1.6GB Whisper model)
+# or: ./setup.sh --minimal   (required deps only)
+```
+
+`setup.sh` installs Node/ffmpeg (via Homebrew), the Node deps, the Claude Code CLI, and — if you say yes — local Whisper + model, the wake-word stack, filler audio, and the `clawd-on-desk` pet. It is safe to re-run. The only two things it can't do for you: **sign in to Claude** (`claude`) and **paste your ElevenLabs key** into `.env`.
+
+You can also just hand the manual steps below to Claude Code itself and let it install everything.
+
+Prefer to do it by hand? The full breakdown follows. **Steps 1–6 are required; 7–9 are optional.**
 
 ### 1. Install Node.js (≥ 18.17)
 ```bash
@@ -171,21 +215,46 @@ cp .env.example .env
 ```
 
 ### 7. (Optional) Offline speech-to-text — private, free, no network
+
+We use **[whisper.cpp](https://github.com/ggerganov/whisper.cpp)** with the **`large-v3-turbo`** GGML model by default — fast, accurate, and fully on-device. The Homebrew package gives you the `whisper-server` binary; the model file is downloaded separately from Hugging Face.
+
 ```bash
-brew install whisper-cpp
+brew install whisper-cpp                       # provides the whisper-server binary
 mkdir -p ~/.whisper-models
-# download a GGML model (e.g. ggml-large-v3-turbo.bin) into ~/.whisper-models/
+
+# Download the exact model the engine looks for (~1.6 GB) from Hugging Face:
+curl -L -o ~/.whisper-models/ggml-large-v3-turbo.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin
+
+# Prefer a smaller download? Use the quantized turbo model (~570 MB) and point
+# COACH_WHISPER_MODEL at it:
+# curl -L -o ~/.whisper-models/ggml-large-v3-turbo-q5_0.bin \
+#   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin
 ```
-If the model exists, the engine uses local Whisper automatically; otherwise it falls back to ElevenLabs Scribe. Force either with `COACH_STT=local` / `COACH_STT=scribe`.
+
+If a model is present at `~/.whisper-models/ggml-large-v3-turbo.bin`, the engine uses local Whisper automatically; otherwise it falls back to ElevenLabs Scribe (cloud). Override the path with `COACH_WHISPER_MODEL`, or force the backend with `COACH_STT=local` / `COACH_STT=scribe`.
 
 ### 8. (Optional) Enable the "Claude" wake word — local, no key
+
+So you can summon it by shouting **"Claude"** without touching anything. Detection is fully on-device via [EfficientWord-Net](https://github.com/Ant-Brain/EfficientWord-Net) (few-shot, no cloud, no key). You **enroll your own voice once** — this is the recording the wake word is matched against.
+
 ```bash
-brew install portaudio
-pip3 install -r requirements-wake.txt
-python3 enroll_claude.py        # say "Claude" 4 times → generates claude_ref.json
-# then set COACH_WAKE=1 in .env
+brew install portaudio                  # native audio backend PyAudio needs
+pip3 install -r requirements-wake.txt    # EfficientWord-Net + sounddevice
+python3 enroll_claude.py                 # records you saying "Claude" 4 times
 ```
-Without it you can still operate the pet by clicking it.
+
+What enrollment does:
+- It prompts you and records **4 short clips of you saying "Claude"** (about 1.5s each) into `claude_samples/`, then builds a voice reference model at `claude_ref.json`.
+- Say it clearly and consistently, the way you'll actually call it. Re-run `enroll_claude.py` anytime to redo the recordings (e.g. if waking is unreliable).
+- Both `claude_samples/` and `claude_ref.json` stay on your machine and are git-ignored — your voice never leaves your computer.
+
+Then enable it:
+```bash
+# in .env
+COACH_WAKE=1
+```
+Tuning: the match threshold is `COACH_WAKE_THRESHOLD` (default `0.65`) — raise it if it false-triggers, lower it if it won't wake. Without the wake word you can still start a session by clicking the pet.
 
 ### 9. (Optional) Pre-generate filler "thinking" sounds
 ```bash

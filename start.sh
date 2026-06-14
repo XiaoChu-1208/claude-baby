@@ -1,41 +1,55 @@
-#!/bin/bash
-# 一键拉起英语口语陪练：桌宠 + 引擎，全部后台运行（不占终端，关窗口也不退）。
-# 日志：/tmp/coach-engine.log（引擎）/tmp/clawd-pet.log（桌宠）。
-# 停止：hello stop  或  pkill -f coach-engine.js && pkill -9 -f clawd-on-desk/.../electron
+#!/usr/bin/env bash
+# Claude Baby — start both the desktop pet and the engine in the background.
+# Nothing stays attached to your terminal; closing the window won't stop them.
+#
+# Logs:  /tmp/coach-engine.log (engine)   /tmp/clawd-pet.log (pet)
+# Stop:  pkill -f coach-engine.js && pkill -9 -f "clawd-on-desk/node_modules/electron"
+#
+# Paths are derived from this script's location. The pet (clawd-on-desk) is
+# expected as a sibling folder; override with CLAWD_PET_DIR if it lives elsewhere.
 
-COACH="$HOME/Desktop/同步/english-speaking-coach"
-PET="$HOME/Desktop/同步/clawd-on-desk"
-PORT=23390
+COACH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PET="${CLAWD_PET_DIR:-$(cd "$COACH/.." && pwd)/clawd-on-desk}"
+PORT="${COACH_CONTROL_PORT:-23390}"
 
-# 强制释放控制端口：先 SIGTERM 让旧引擎走 shutdown，再 -9 兜底，轮询直到端口真的空了。
+if [ ! -d "$PET" ]; then
+  echo "Error: pet app not found at $PET"
+  echo "Clone it next to this folder:  git clone https://github.com/XiaoChu-1208/clawd-on-desk.git"
+  echo "or set CLAWD_PET_DIR to its path."
+  exit 1
+fi
+
+# Force-release the control port: SIGTERM the old engine, then -9 as a fallback,
+# polling until the port is actually free.
 free_port() {
   pkill -f coach-engine.js 2>/dev/null
-  local pids; pids=$(lsof -ti tcp:$PORT 2>/dev/null)
+  local pids; pids=$(lsof -ti tcp:"$PORT" 2>/dev/null)
   [ -n "$pids" ] && kill $pids 2>/dev/null
   for i in $(seq 1 20); do
-    pids=$(lsof -ti tcp:$PORT 2>/dev/null)
+    pids=$(lsof -ti tcp:"$PORT" 2>/dev/null)
     [ -z "$pids" ] && return 0
     sleep 0.25
-    pids=$(lsof -ti tcp:$PORT 2>/dev/null)
+    pids=$(lsof -ti tcp:"$PORT" 2>/dev/null)
     [ -n "$pids" ] && kill -9 $pids 2>/dev/null
   done
-  [ -z "$(lsof -ti tcp:$PORT 2>/dev/null)" ]
+  [ -z "$(lsof -ti tcp:"$PORT" 2>/dev/null)" ]
 }
 
-echo "▸ 收掉旧的实例…"
+echo "==> Stopping any old instances..."
 pkill -9 -f "clawd-on-desk/node_modules/electron" 2>/dev/null
-free_port || { echo "错误：端口 $PORT 始终释放不掉，先手动收掉：lsof -nP -iTCP:$PORT"; exit 1; }
+free_port || { echo "Error: port $PORT won't free up; inspect with: lsof -nP -iTCP:$PORT"; exit 1; }
 sleep 1
 
-echo "▸ 启动桌宠（后台）…"
+echo "==> Starting the pet (background)..."
 ( cd "$PET" && CLAWD_COACH_MODE=1 nohup npm start >/tmp/clawd-pet.log 2>&1 & )
 
-# 等桌宠起来（首次会问麦克风权限 → 点允许）
+# Give the pet time to come up (first run asks for mic permission -> click Allow).
 sleep 6
-free_port   # 6s 内若有人连点桌宠把引擎 spawn 了，再兜一次底
+free_port   # in case a click on the pet spawned an engine in those 6s
 
-echo "▸ 启动引擎（后台）…"
+echo "==> Starting the engine (background)..."
 ( cd "$COACH" && nohup node coach-engine.js >/tmp/coach-engine.log 2>&1 & )
 
-echo "已在后台启动。日志: /tmp/coach-engine.log  /tmp/clawd-pet.log"
-echo "  停止: hello stop"
+echo "Started in the background."
+echo "  Logs: /tmp/coach-engine.log   /tmp/clawd-pet.log"
+echo "  Stop: pkill -f coach-engine.js && pkill -9 -f \"clawd-on-desk/node_modules/electron\""

@@ -203,7 +203,7 @@ function brainErrMsg(raw) {
     return '这次想太久超时了，再说一次试试？';
   return currentMode === 'agent' ? 'Sorry, something went wrong or timed out.' : '';
 }
-let pendingImage = null;   // {media_type,data} 下一次 ask 作为图片块附上(聊天栏粘贴的剪贴板图片);用后清空
+let pendingImages = [];   // [{media_type,data}] 下一次 ask 作为图片块附上(聊天栏粘贴的剪贴板图片,可多张);用后清空
 function ask(text) {
   return new Promise((resolve, reject) => {
     if (!brainProc) return reject(new Error('brain not started'));
@@ -216,13 +216,13 @@ function ask(text) {
       try { startBrain(currentMode, currentScenario, currentModel, currentSessionId || undefined); } catch (_) {}
       if (p) p.reject(new Error('claude 超时'));
     }, ms) };
-    // 有粘贴的图片 → 用内容块数组(文本块 + 图片块);否则普通字符串。
+    // 有粘贴的图片 → 用内容块数组(文本块 + 一或多个图片块);否则普通字符串。
     let content = text;
-    if (pendingImage) {
+    if (pendingImages.length) {
       content = [];
       if (text) content.push({ type: 'text', text });
-      content.push({ type: 'image', source: { type: 'base64', media_type: pendingImage.media_type, data: pendingImage.data } });
-      pendingImage = null;
+      for (const im of pendingImages) content.push({ type: 'image', source: { type: 'base64', media_type: im.media_type, data: im.data } });
+      pendingImages = [];
     }
     brainProc.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n');
   });
@@ -718,7 +718,7 @@ function switchMode(mode, scenario) {
 }
 
 async function handleUtterance(text, oneShot) {
-  const hasImg = !!pendingImage;                  // 这一轮带粘贴的图片(纯图也放行)
+  const hasImg = pendingImages.length > 0;        // 这一轮带粘贴的图片(纯图也放行,可多张)
   text = text || '';
   // 隐藏/说话中 → 一律不处理。语音(oneShot)在暂停时不处理；打字即便暂停也允许发。
   if (!sessionActive || speaking || panelHidden) return;
@@ -735,8 +735,8 @@ async function handleUtterance(text, oneShot) {
   try {
     // oneShot(语音一次性转写)→ 气泡放大展开+文字渐显；打字/流式 → 直接顶上去。
     // 斜杠命令 → 气泡走 'cmd' 黑色变体；粘贴的图片 → 带 image 让气泡里方形预览。
-    const imgUrl = (hasImg && pendingImage) ? `data:${pendingImage.media_type};base64,${pendingImage.data}` : null;
-    chat({ type: 'add', role: 'user', text: mine, anim: oneShot ? 'grow' : null, variant: isSlash ? 'cmd' : undefined, image: imgUrl || undefined });
+    const imgUrls = pendingImages.map((im) => `data:${im.media_type};base64,${im.data}`);
+    chat({ type: 'add', role: 'user', text: mine, anim: oneShot ? 'grow' : null, variant: isSlash ? 'cmd' : undefined, images: imgUrls.length ? imgUrls : undefined });
     console.log(`\n  你: ${mine}${hasImg ? ' [+image]' : ''}`);
 
     // 先拦控制指令（切模型/模式/重命名/音量/桌宠），不喂给大脑。带图片 → 不拦,直接走大脑当对话。
@@ -1313,13 +1313,14 @@ const controlServer = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/text') {           // 打字输入（聊天栏回车）+ 可选粘贴的图片
     let b = ''; req.on('data', (c) => { b += c; if (b.length > 12_000_000) req.destroy(); });   // 放大上限:图片 base64 可能几 MB
     req.on('end', () => {
-      let t = '', img = '';
-      try { const j = JSON.parse(b || '{}'); t = j.text || ''; img = j.image || ''; } catch (_) {}
-      if (img) {   // data URL: data:image/png;base64,xxxx
-        const m = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i.exec(img);
-        if (m) pendingImage = { media_type: m[1], data: m[2] };
+      let t = '', imgs = [];
+      try { const j = JSON.parse(b || '{}'); t = j.text || ''; if (Array.isArray(j.images)) imgs = j.images; else if (j.image) imgs = [j.image]; } catch (_) {}
+      pendingImages = [];
+      for (const u of imgs) {   // data URL: data:image/png;base64,xxxx
+        const m = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i.exec(String(u || ''));
+        if (m) pendingImages.push({ media_type: m[1], data: m[2] });
       }
-      if (t || pendingImage) { bumpIdle(); handleUtterance(String(t)); }   // 打字/图片 = 有操作，重置闲置计时
+      if (t || pendingImages.length) { bumpIdle(); handleUtterance(String(t)); }   // 打字/图片 = 有操作，重置闲置计时
       res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}');
     });
     return;

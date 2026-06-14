@@ -1454,6 +1454,9 @@ function applyConfig(c) {
 let MUSIC_APP = process.env.COACH_MUSIC_APP || '';   // pgrep -if 模式;'' = 关闭
 let musicTimer = null, musicGrooving = false, musicLastGroove = 0;
 const MUSIC_GROOVE_ANIM = process.env.COACH_MUSIC_ANIM || 'clawd-headphones-groove.svg';
+// 停律动:不能靠 setState(idle)(同值会被 state.js 去重、不触发 cancelReaction),改用一个短的中性动画把
+// 律动顶掉、随即自然结束回到 idle。
+const MUSIC_STOP_ANIM = process.env.COACH_MUSIC_STOP_ANIM || 'clawd-idle-look.svg';
 function _runCmd(cmd, args) {
   return new Promise((resolve) => {
     try {
@@ -1487,7 +1490,7 @@ async function musicTick() {
     }
     musicGrooving = true;
   } else {
-    if (musicGrooving && idle) { sayPet('', ST_IDLE); console.log('[music] 暂停/停 → idle'); }   // 会话期(idle=false)不动它
+    if (musicGrooving && idle) { sayPet('', ST_IDLE, MUSIC_STOP_ANIM, 350); console.log('[music] 暂停/停 → idle'); }   // 短动画顶掉律动→回 idle;会话期(idle=false)不动它
     musicGrooving = false;
   }
 }

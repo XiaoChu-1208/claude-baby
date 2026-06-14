@@ -7,9 +7,11 @@
 ![Node](https://img.shields.io/badge/node-%E2%89%A518.17-brightgreen)
 
 <p align="center">
-  <video src="https://github.com/XiaoChu-1208/claude-baby/raw/main/assets/demo.mp4" controls muted width="640"></video>
+  <a href="https://github.com/XiaoChu-1208/claude-baby/raw/main/assets/demo.mp4">
+    <img src="https://github.com/XiaoChu-1208/claude-baby/raw/main/assets/demo.gif" width="520" alt="Claude Baby demo: talking to the desktop pet, which runs Claude Code and replies by voice">
+  </a>
 </p>
-<p align="center"><sub>▶ Demo — if the player doesn't load inline, <a href="https://github.com/XiaoChu-1208/claude-baby/raw/main/assets/demo.mp4">watch it here</a>.</sub></p>
+<p align="center"><sub>▶ Click the GIF to watch the full video with sound.</sub></p>
 
 It is **Claude Code you can talk to**. Instead of sitting in a terminal, you keep working; the pet listens in the background, jumps out when called, does the task, and tells you when it is done — then gets out of your way.
 

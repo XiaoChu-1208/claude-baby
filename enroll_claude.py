@@ -2,7 +2,7 @@
 # enroll_claude.py — 录 4 遍 "Claude" → 生成唤醒模型 claude_ref.json
 # (EfficientWord-Net 少样本:不训练、不联网、不碰 Colab。最少 4 个样本。)
 #
-# 跑:  cd ~/Desktop/同步/english-speaking-coach && python3 enroll_claude.py
+# 跑:  cd ~/Desktop/同步/claude-baby && python3 enroll_claude.py
 # 第一次会弹"允许麦克风",点允许。每遍按回车 → 倒数 → 清楚说一声 "Claude"。
 import os
 import sys

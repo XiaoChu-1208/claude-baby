@@ -1,7 +1,7 @@
 // voice-wake.js — 唤醒词唤醒(可选,默认关):拉起 openWakeWord 的 Python 边车(wake-listener.py)。
 // 边车听到唤醒词 → POST /start 给本引擎。无 key、本地、不卡邮箱。
 //
-// 开启:在 english-speaking-coach/.env 设 COACH_WAKE=1
+// 开启:在 claude-baby/.env 设 COACH_WAKE=1
 //       (并先装好:python3 + pip install openwakeword onnxruntime sounddevice numpy)
 // 喊 "Claude":训练一个 openWakeWord 自定义模型,设 COACH_WAKE_MODEL=/路径/claude.onnx;
 //             不设则用内置词 "hey_jarvis"。

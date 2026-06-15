@@ -1,5 +1,5 @@
 // generate-acks.js — 预生成 40 条"收到"反应音(同一 ElevenLabs 声音 + 同款电话音效)。
-// 跑一次:  cd ~/Desktop/同步/english-speaking-coach && node generate-acks.js
+// 跑一次:  cd ~/Desktop/同步/claude-baby && node generate-acks.js
 // 用户说完话送转写的那一刻,引擎随机播一条垫住等待(见 coach-engine 的 playAck)。
 // 已存在的文件会跳过(可重复跑补齐)。删掉 acks/ 重跑可全部重生成。
 import 'dotenv/config';

@@ -150,7 +150,7 @@ function buildSystem(scenario) {
   return `${BASE_SYSTEM}\n\n${s}`;
 }
 
-// ============ 桌宠联动：把 AI 回复推给 clawd 桌宠（说话气泡 + 语义动画）============
+// ============ Claude Baby 联动：把 AI 回复推给 clawd Claude Baby（说话气泡 + 语义动画）============
 // clawd-on-desk 跑在本机 127.0.0.1，端口写在 ~/.clawd/runtime.json（默认 23333）。
 // 用 Node 原生 http 直连本地，绕开上面 setGlobalDispatcher 的代理；fire-and-forget，
 // clawd 没开也不影响对话。设 PET=0 可整体关闭联动。
@@ -165,7 +165,7 @@ function clawdPort() {
   return 23333;
 }
 
-// 语义 → 桌宠动画状态（启发式；以后可让大脑直接吐一个 mood 标签更准）
+// 语义 → Claude Baby 动画状态（启发式；以后可让大脑直接吐一个 mood 标签更准）
 function moodToState(text) {
   const t = (text || '').toLowerCase();
   if (/\btip:/i.test(text || '')) return 'notification';                 // 纠错/教学
@@ -174,7 +174,7 @@ function moodToState(text) {
   return 'juggling';                                                     // 正常对话 → 戴耳机摇摆（像在聊天）
 }
 
-// 推一条「说话+动画」给桌宠。text 为空则只切状态、不弹气泡。
+// 推一条「说话+动画」给 Claude Baby 。text 为空则只切状态、不弹气泡。
 function petSay({ text = '', state, theme = 'dark', ttl } = {}) {
   if (!PET_ENABLED) return;
   const payload = JSON.stringify({ text, state, theme, ttl });
@@ -216,7 +216,7 @@ app.post('/api/session/start', async (req, res) => {
       startBrain(scenario, model);   // 开一次，之后整段对话都复用它
       text = await ask(OPENER);
     }
-    petSay({ text, state: 'attention', theme: req.body?.theme });  // 开场白 → 桌宠开心打招呼
+    petSay({ text, state: 'attention', theme: req.body?.theme });  // 开场白 → Claude Baby 开心打招呼
     res.json({ text });
   } catch (err) {
     console.error('[start]', err?.message || err);
@@ -228,7 +228,7 @@ app.post('/api/session/start', async (req, res) => {
 app.post('/api/chat', async (req, res) => {
   try {
     const { text, messages = [], scenario = 'free', model = 'haiku', theme } = req.body || {};
-    petSay({ state: 'thinking' });   // 用户说完、AI 正在想 → 桌宠思考态（不弹气泡）
+    petSay({ state: 'thinking' });   // 用户说完、AI 正在想 → Claude Baby 思考态（不弹气泡）
     let reply;
     if (BRAIN === 'api') {
       const recent = messages.slice(-16).filter((m) => m && m.role && typeof m.content === 'string');

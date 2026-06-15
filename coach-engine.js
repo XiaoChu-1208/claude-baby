@@ -1,13 +1,13 @@
-// coach-engine.js — Claude Baby 的大脑：无头语音 agent 引擎（给 clawd-on-desk 桌宠用）
+// coach-engine.js — Claude Baby 的大脑：无头语音 agent 引擎（给 clawd-on-desk Claude Baby 用）
 //
 //   ffmpeg 抓麦(avfoundation) → ElevenLabs Scribe 整段转写(VAD 断句后送)
 //   → 常驻 claude(吃订阅) → ElevenLabs 发声(afplay 播)
-//   → POST /say 给桌宠：弹气泡 + 驱动动画状态
+//   → POST /say 给 Claude Baby：弹气泡 + 驱动动画状态
 //
-// 没有浏览器、没有窗口。半双工：桌宠说话时停止采集，不会把自己的话转写进去。
+// 没有浏览器、没有窗口。半双工：Claude Baby 说话时停止采集，不会把自己的话转写进去。
 // 跑：  node coach-engine.js
 // 停：  Ctrl-C
-// 暂停：POST http://127.0.0.1:23390/pause | /resume | /toggle （给桌宠全局热键调）
+// 暂停：POST http://127.0.0.1:23390/pause | /resume | /toggle （给 Claude Baby 全局热键调）
 
 import 'dotenv/config';
 import { spawn } from 'node:child_process';
@@ -76,7 +76,7 @@ const COACH_OPENER = "Let's begin. Give a short, natural opening line in charact
 
 // ───────────────────────── agent 模式：通用助手（追加在 Claude Code 默认大脑之上）─────────────────────────
 // 注意：agent 模式不替换系统提示，用 --append-system-prompt 追加这段，保留 Claude Code 自身的
-// 干活能力（工具、skills、CLAUDE.md）。这段只交代「我是被语音/桌宠驱动的」这件事。
+// 干活能力（工具、skills、CLAUDE.md）。这段只交代「我是被语音/Claude Baby 驱动的」这件事。
 const AGENT_ADDENDUM = `You are Claude Code. Your on-screen form is a small desktop pet, but that is ONLY your appearance — it does NOT limit what you can do. You keep your full agentic capabilities: read/edit files, run commands, search the web, use MCP servers and skills, and finish multi-step tasks. Behave exactly as you would in a normal Claude Code session — same competence, same initiative, same willingness to dig in. The user talks to you by voice and reads your replies on a small chat panel; the first sentence is also read aloud by TTS.
 
 Behaviour:
@@ -407,11 +407,11 @@ function refreshBrainMemory() {
   try { startBrain(currentMode, currentScenario, currentModel, currentSessionId || undefined); } catch (_) {}
 }
 
-// panelLoaded：桌宠聊天栏当前是否已经装着「当前会话」的内容。
+// panelLoaded：Claude Baby 聊天栏当前是否已经装着「当前会话」的内容。
 // 双击关语音只是 hide 面板（DOM 还在），所以再开时若已 loaded 就别重建，直接让它复现，免得整段重刷。
 // 只有「引擎刚启动」「切了会话」「新建会话」这种 DOM 与会话对不上时才重建。
 let panelLoaded = false;
-// 把当前 transcript 重画到桌宠聊天栏（clear + 逐条静态 add，不逐字打字）。
+// 把当前 transcript 重画到 Claude Baby 聊天栏（clear + 逐条静态 add，不逐字打字）。
 // fadeIn=true（切换会话时）：先把整栏透明度压到 0、静态堆好所有内容，再整体 3 秒渐显。
 function restorePanel(fadeIn) {
   chat({ type: 'clear' });
@@ -487,7 +487,7 @@ function bootSession() {
   }
 }
 
-// ───────────────────────── 桌宠：POST /say（弹气泡 + 动画）─────────────────────────
+// ───────────────────────── Claude Baby：POST /say（弹气泡 + 动画）─────────────────────────
 function petPort() {
   try { return JSON.parse(readFileSync(join(homedir(), '.clawd', 'runtime.json'), 'utf8')).port || 23333; }
   catch (_) { return 23333; }
@@ -510,7 +510,7 @@ function userBubble(payload) {
 }
 
 // 驱动「聊天记录栏」：{type:'clear'|'add'(role,text)|'input'|'live'(text)|'endinput'|'hide'}
-// 面板隐显由桌宠端自己管（chat-stack 的 userHidden）：引擎照常推所有更新，桌宠隐藏期间
+// 面板隐显由 Claude Baby 端自己管（chat-stack 的 userHidden）：引擎照常推所有更新，Claude Baby 隐藏期间
 // 只更新 DOM、不弹窗，再显示时内容已是最新。引擎只负责发 hide / show 指令，不再抑制消息（避免偶发卡死看不见）。
 let panelHidden = false;
 let inMini = false;        // clawd 当前是否在 mini 模式(由 clawd 经 POST /mini 告知)
@@ -523,7 +523,7 @@ function chat(payload) {
   req.write(body); req.end();
 }
 
-// 触发桌宠内置音效（confirm 噔噔 / complete）
+// 触发 Claude Baby 内置音效（confirm 噔噔 / complete）
 function petSound(name) {
   const body = JSON.stringify({ sound: name });
   const req = http.request({ host: '127.0.0.1', port: petPort(), path: '/say', method: 'POST',
@@ -532,7 +532,7 @@ function petSound(name) {
   req.write(body); req.end();
 }
 
-// 设置页操作 → 桌宠"收到"反应(开心点一下;防抖,不打断说话/不改状态,只叠一层短动画)
+// 设置页操作 → Claude Baby"收到"反应(开心点一下;防抖,不打断说话/不改状态,只叠一层短动画)
 let _lastAck = 0;
 function petAck() {
   if (speaking) return;
@@ -542,8 +542,8 @@ function petAck() {
   petHappy(900);                       // mini 时用 mini-happy
 }
 
-// ───────────────────────── Claude 自驱桌宠（改尺寸 / 进出 mini / 表演动画）─────────────────────────
-// 驱动桌宠身体：{size:'S'|'M'|'L'} 变大变小、{mini:true|false} 缩到角落/回来。桌宠端 /say 收 control 分支。
+// ───────────────────────── Claude 自驱 Claude Baby（改尺寸 / 进出 mini / 表演动画）─────────────────────────
+// 驱动 Claude Baby 身体：{size:'S'|'M'|'L'} 变大变小、{mini:true|false} 缩到角落/回来。 Claude Baby 端 /say 收 control 分支。
 function petControl(ctrl) {
   const body = JSON.stringify({ control: ctrl });
   const req = http.request({ host: '127.0.0.1', port: petPort(), path: '/say', method: 'POST',
@@ -551,7 +551,7 @@ function petControl(ctrl) {
   req.on('error', () => {});
   req.write(body); req.end();
 }
-const SIZE_ALIAS = {                       // 友好词 → 桌宠三档尺寸
+const SIZE_ALIAS = {                       // 友好词 → Claude Baby 三档尺寸
   s: 'S', small: 'S', smaller: 'S', shrink: 'S', tiny: 'S',
   m: 'M', medium: 'M', normal: 'M', mid: 'M', default: 'M',
   l: 'L', large: 'L', big: 'L', bigger: 'L', huge: 'L', grow: 'L', max: 'L',
@@ -578,7 +578,7 @@ function animSvg(name) {
   if (/^clawd-[a-z0-9-]+\.svg$/.test(n)) return n;   // 直接给文件名也接受
   return ANIM_ALIAS[n] || null;
 }
-// 从回复里解析 + 应用 + 抠掉所有 [[...]] 桌宠标记（绝不显示/朗读）。返回清理后的文本（可能为空=纯动作）。
+// 从回复里解析 + 应用 + 抠掉所有 [[...]] Claude Baby 标记（绝不显示/朗读）。返回清理后的文本（可能为空=纯动作）。
 function applyPetMarkers(text) {
   let t = String(text || '');
   // [[volume:0~1]] —— 自调音量
@@ -615,7 +615,7 @@ const VOICE_FX_COMPLEX = process.env.COACH_VOICE_FX_COMPLEX ||
 let currentAfplay = null;   // 当前播放/处理子进程（afplay 或 ffmpeg）——打断时杀它
 let ttsAborted = false;     // 打断/暂停时置 true，让处理中的 FX 别再继续播
 let turnAborted = false;    // 整轮被点击打断：思考阶段点也算，speakTTS 会据此拒绝开口（一轮开始才清零）
-let ttsVolume = 1.0;        // 桌宠说话音量（右键菜单调；afplay -v，0=静音 1=正常）
+let ttsVolume = 1.0;        // Claude Baby 说话音量（右键菜单调；afplay -v，0=静音 1=正常）
 function speakTTS(text) {
   return new Promise(async (resolve) => {
     if (turnAborted) { resolve(); return; }   // 这轮在思考/合成期间已被点击打断 → 根本不开口
@@ -672,7 +672,7 @@ function playAck(pool) {
 // ───────────────────────── 状态 + 半双工 ─────────────────────────
 let sessionActive = false; // 练习中？（连点4次 /toggle-session 切换）
 let paused = false;        // 会话内手动暂停（Control+Esc）
-let speaking = false;      // 桌宠正在说话
+let speaking = false;      // Claude Baby 正在说话
 let forwarding = false;    // 是否把麦克风 PCM 喂给 Scribe 采集（半双工开关）
 let pendingFinals = [], flushTimer = null;
 let lastTyped = false;     // 上一轮是不是打字输入的 → 下一轮默认进打字预备态（不开麦）
@@ -810,7 +810,7 @@ function parseCommand(text) {
   if (t.length <= 16 && /(英语陪练|练英语|口语陪练|陪我练|coach\s*模式)/i.test(t)) return { kind: 'mode', mode: 'coach', scenario: 'free' };
   if (t.length <= 16 && /(退出陪练|回到助手|普通模式|助手模式|退出英语|agent\s*模式)/i.test(t)) return { kind: 'mode', mode: 'agent' };
   // 音量(本地直接调,不喂大脑):静音 / 恢复 / 具体百分比 / 大点 / 小点
-  // 「闭嘴 / 别说话」→ 桌宠受惊（感叹号「!」动画）+ 缩到角落，且不出声回嘴。「静音 / mute」仍走音量=0。
+  // 「闭嘴 / 别说话」→ Claude Baby 受惊（感叹号「!」动画）+ 缩到角落，且不出声回嘴。「静音 / mute」仍走音量=0。
   if (/(闭嘴|闭上嘴|住口|别说(?:话|了)|别讲(?:话|了)|别出声|安静(?:点|一下|些)?|shut\s*up|be\s*quiet|hush|zip it|quiet down|stop talking)/i.test(t)
       && !/(取消|恢复|unmute|大声|大点|继续|别安静)/i.test(t))
     return { kind: 'pet', anim: 'alert', mini: true, ack: '' };
@@ -821,13 +821,13 @@ function parseCommand(text) {
   if (t.length <= 18 && /(大点声|大声|声音大|大一点|响一点|响点|louder|turn (?:it|the volume) up|volume up|speak up)/i.test(t)) return { kind: 'volume', delta: 0.25 };
   if (t.length <= 18 && /(小点声|小声|声音小|小一点|轻一点|轻点|quieter|turn (?:it|the volume) down|volume down|too loud)/i.test(t)) return { kind: 'volume', delta: -0.25 };
 
-  // ── Claude 桌宠自控（本地直接执行，不喂大脑 → 100% 听得懂、零延迟，不靠大脑临场发标记）──
+  // ── Claude Claude Baby 自控（本地直接执行，不喂大脑 → 100% 听得懂、零延迟，不靠大脑临场发标记）──
   const petCmd = parsePetCommand(t);
   if (petCmd) return petCmd;
   return null;
 }
 
-// 识别「让桌宠调整自己」的口令：变大变小 / 缩到角落(mini) / 表演某个动画。中英都认。
+// 识别「让 Claude Baby 调整自己」的口令：变大变小 / 缩到角落(mini) / 表演某个动画。中英都认。
 // 故意宽松好触发，但用「自指 / 很短 / 排除其它对象」几道闸避免误吃正常对话（如「把字体变大」）。
 function parsePetCommand(t) {
   const zh = /[一-鿿]/.test(t);
@@ -918,7 +918,7 @@ async function handleUtterance(text, oneShot) {
     chat({ type: 'add', role: 'user', text: mine, anim: oneShot ? 'grow' : null, variant: isSlash ? 'cmd' : undefined, images: imgUrls.length ? imgUrls : undefined });
     console.log(`\n  你: ${mine}${hasImg ? ' [+image]' : ''}`);
 
-    // 先拦控制指令（切模型/模式/重命名/音量/桌宠），不喂给大脑。带图片 → 不拦,直接走大脑当对话。
+    // 先拦控制指令（切模型/模式/重命名/音量/Claude Baby），不喂给大脑。带图片 → 不拦,直接走大脑当对话。
     const cmd = hasImg ? null : parseCommand(mine);
     if (cmd) {
       if (cmd.kind !== 'pet') sayPet('', ST_WORK, isSlash ? 'clawd-working-typing.svg' : null, isSlash ? 600000 : undefined);   // 命令处理→work;斜杠命令用 coding 打字动画
@@ -933,7 +933,7 @@ async function handleUtterance(text, oneShot) {
             : Math.max(0, Math.min(1, ttsVolume + (cmd.delta || 0)));
           ack = ttsVolume === 0 ? '好,我先静音。' : `好,音量调到 ${Math.round(ttsVolume * 100)}% 了。`;
         }
-        else if (cmd.kind === 'pet') {                // 桌宠自控：本地直接执行，绝不喂大脑
+        else if (cmd.kind === 'pet') {                // Claude Baby 自控：本地直接执行，绝不喂大脑
           if (cmd.size) petControl({ size: cmd.size });
           if (cmd.anim) petAnim = animSvg(cmd.anim);  // 把请求的动画当作「说话动画」播，别被默认弹跳覆盖
           if (typeof cmd.mini === 'boolean') {
@@ -1122,6 +1122,8 @@ function scribeFeed(chunk) {
 // 把一段 16k 单声道 WAV 转成文字。local=本机常驻 whisper-server（离线、模型只加载一次）；否则 ElevenLabs Scribe。
 async function transcribe(wav) {
   if (STT === 'local') {
+    if (!(await ensureWhisperReady())) { console.error('[whisper] 未就绪，跳过这段'); return ''; }   // 冷启动兜底：等模型加载完再发
+    touchWhisperIdle();                                                                              // 用到了 → 续上闲置倒计时
     const fd = new FormData();
     fd.append('file', new Blob([wav], { type: 'audio/wav' }), 'audio.wav');
     fd.append('response_format', 'json');
@@ -1140,22 +1142,53 @@ async function transcribe(wav) {
   const j = await r.json();
   return (j.text || '').trim();
 }
-// 常驻 whisper-server：引擎启动时拉起，模型只加载一次。端口已被占（已有 server）就复用，不重开。
+// whisper-server 改为「按需」：喊词唤醒时拉起（边说边加载，冷启动约 1~2s），闲置自动退掉省内存（约 1.7G）。
+// 不再开机常驻；唤醒触发 startWhisperServer()，转写前 ensureWhisperReady() 兜住竞态，用完 touchWhisperIdle() 续命。
 let whisperProc = null;
+let whisperIdleTimer = null;
+const WHISPER_IDLE_MS = Number(process.env.COACH_WHISPER_IDLE_MS || 5 * 60 * 1000);   // 闲置多久退掉 whisper（默认 5 分钟；设 0 关闭自动退）
+// 探一下 whisper 端口是否已能响应（whisper-server 加载完模型才开始监听）。
+function whisperPortAlive(timeoutMs = 600) {
+  return new Promise((resolve) => {
+    const probe = http.request({ host: '127.0.0.1', port: WHISPER_PORT, method: 'HEAD', timeout: timeoutMs }, (res) => { res.resume(); resolve(true); });
+    probe.on('error', () => resolve(false));
+    probe.on('timeout', () => { try { probe.destroy(); } catch (_) {} resolve(false); });
+    probe.end();
+  });
+}
+// 没在跑就拉起（不阻塞；模型在后台加载）。端口已被占（手动起的/上轮残留）则复用，不重开。
 function startWhisperServer() {
   if (STT !== 'local' || whisperProc) return;
-  const probe = http.request({ host: '127.0.0.1', port: WHISPER_PORT, method: 'HEAD', timeout: 600 }, () => {
-    console.log(`[stt] 复用已在跑的 whisper-server @ :${WHISPER_PORT}`);   // 已有 → 不重开
-  });
-  probe.on('error', () => {   // 没有 → 拉起
+  whisperPortAlive().then((alive) => {
+    if (whisperProc) return;                       // 期间已被别处拉起
+    if (alive) { console.log(`[stt] 复用已在跑的 whisper-server @ :${WHISPER_PORT}`); return; }
     try {
       whisperProc = spawn(WHISPER_SERVER_BIN, ['-m', WHISPER_MODEL, '--host', '127.0.0.1', '--port', String(WHISPER_PORT), '-l', WHISPER_LANG], { stdio: 'ignore' });
       whisperProc.on('exit', () => { whisperProc = null; });
       console.log(`[stt] 拉起 whisper-server（${WHISPER_MODEL.split('/').pop()} @ :${WHISPER_PORT}，加载中…）`);
     } catch (e) { console.error('[stt] whisper-server 启动失败:', e.message); }
   });
-  probe.on('timeout', () => probe.destroy());
-  probe.end();
+}
+// 确保 whisper 已就绪（端口能响应）。冷启动时边等边轮询，最多等 maxWaitMs。
+async function ensureWhisperReady(maxWaitMs = 8000) {
+  if (STT !== 'local') return true;
+  startWhisperServer();
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    if (await whisperPortAlive(500)) return true;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  console.error('[stt] 等 whisper 就绪超时（' + maxWaitMs + 'ms）');
+  return false;
+}
+// 续上「闲置退掉」倒计时：每次用到就续期；到点没人用就杀掉省内存。
+function touchWhisperIdle() {
+  if (STT !== 'local' || !WHISPER_IDLE_MS) return;
+  if (whisperIdleTimer) clearTimeout(whisperIdleTimer);
+  whisperIdleTimer = setTimeout(() => {
+    whisperIdleTimer = null;
+    if (whisperProc) { console.log('[stt] 闲置 ' + Math.round(WHISPER_IDLE_MS / 60000) + ' 分钟 → 退掉 whisper-server 省内存'); try { whisperProc.kill('SIGTERM'); } catch (_) {} whisperProc = null; }
+  }, WHISPER_IDLE_MS);
 }
 async function flushScribe() {
   if (!scribeActive) return;
@@ -1180,7 +1213,7 @@ async function flushScribe() {
 }
 
 // ───────────────────────── ffmpeg 抓麦 → 推流 ─────────────────────────
-// 实时音量 → 桌宠波形：算 PCM 的 RMS，节流 ~12/s 发给 clawd（chat type:'level'）
+// 实时音量 → Claude Baby 波形：算 PCM 的 RMS，节流 ~12/s 发给 clawd（chat type:'level'）
 let _lastLevelTs = 0;
 function emitMicLevel(chunk) {
   const now = Date.now();
@@ -1210,7 +1243,7 @@ function startMic() {
     if (speaking) { bargeWatch(chunk); return; }   // 它在说话/思考 → 不喂 Scribe,只盯你的音量找打断(你一开口就掐它)
     // 最硬的一道闸：暂停 / 没在收音 → 一律丢弃，绝不处理或发送
     if (!forwarding || paused) return;
-    emitMicLevel(chunk);   // 实时音量 → 桌宠输入框波形
+    emitMicLevel(chunk);   // 实时音量 → Claude Baby 输入框波形
     scribeFeed(chunk); // ElevenLabs Scribe：累积 PCM + VAD 断句
   });
   mic.stderr.on('data', (d) => { const s = d.toString(); if (/error|denied|Permission/i.test(s)) console.error('[mic]', s.trim()); });
@@ -1296,10 +1329,11 @@ function wakeToRecording(conf = 1, rms = 0) {
     console.log('[wake] 说话中收到喊词 → 忽略(打断已改为:你开口说话即打断)');
     return;
   }
+  startWhisperServer(); touchWhisperIdle();   // 喊到了就开始加载 whisper（边说边加载，等你说完正好就绪）；闲置自动退
   const wasPaused = paused;
   paused = false; lastTyped = false;   // 清掉暂停/上轮打字 → resumeListen 会开麦倾听（不是灰 type-only）
   if (inMini) { wokeFromMini = true; inMini = false; petControl({ mini: false }); }   // 从 mini 喊出来 → 让 clawd 先缩放出来(说完空闲会缩回去)
-  sayPet('', ST_HAPPY, 'clawd-wake.svg', 1300);   // 喊到了 → 桌宠先"跳出来"反应一下,再起/显示会话
+  sayPet('', ST_HAPPY, 'clawd-wake.svg', 1300);   // 喊到了 → Claude Baby 先"跳出来"反应一下,再起/显示会话
   if (!sessionActive) { console.log('[wake] 唤醒 → 起会话(录音)'); startSession(); }
   else if (panelHidden) { console.log('[wake] 唤醒 → 显示会话 + 录音'); showPanel(); }
   // 显示着、没隐藏:暂停中 或 正在打字预备(点了输入框、/mic-off 关了麦、forwarding=false)→ 喊 Claude 立刻转为录音说话(说完照常发送)。
@@ -1552,12 +1586,12 @@ function applyConfig(c) {
   if ('elevenApiKey' in c && typeof c.elevenApiKey === 'string' && c.elevenApiKey.trim()) ELEVENLABS_API_KEY = c.elevenApiKey.trim();
   console.log('  [config] 更新', JSON.stringify({ ...c, elevenApiKey: c.elevenApiKey ? '***' : undefined }));
   saveRuntimeConfig();   // 落盘 → 重启自动恢复
-  petAck();              // 设置生效 → 桌宠反应一下
+  petAck();              // 设置生效 → Claude Baby 反应一下
   return getConfig();
 }
 
-// ───────────────────────── 音乐联动:配的音乐 App 在放歌 → 桌宠跳律动(headphones-groove);暂停/停 → idle ─────────────────────────
-// 收进引擎(常驻,不用手动跑脚本)。仅在桌宠空闲(没在对话)时联动,不抢会话动画。
+// ───────────────────────── 音乐联动:配的音乐 App 在放歌 → Claude Baby 跳律动(headphones-groove);暂停/停 → idle ─────────────────────────
+// 收进引擎(常驻,不用手动跑脚本)。仅在 Claude Baby 空闲(没在对话)时联动,不抢会话动画。
 // 判定:配的 App 在跑 且 nowplaying-cli 的 playbackRate>0(暂停=0);没装 nowplaying-cli 则退回"App 在跑就当在放"。
 let MUSIC_APP = process.env.COACH_MUSIC_APP || '';   // pgrep -if 模式;'' = 关闭
 let musicTimer = null, musicGrooving = false, musicLastGroove = 0;
@@ -1751,6 +1785,10 @@ const controlServer = http.createServer((req, res) => {
     });
     return;
   }
+  if (req.method === 'POST' && req.url === '/quit') {   // 右键「退出」/ hello stop：道别(说完)再全关——两个入口走同一条路
+    gracefulQuit(res);
+    return;
+  }
   if (req.method === 'POST') {
     if (req.url === '/toggle-session') {  // 双击：没开→起会话；以「面板是否隐藏」为准来回切（显示/隐藏与录音锁同步）
       if (!sessionActive) startSession();
@@ -1762,7 +1800,7 @@ const controlServer = http.createServer((req, res) => {
     else if (req.url === '/pause') micPause();             // 暂停录音（仍可打字）
     else if (req.url === '/resume') micResume();
     else if (req.url === '/toggle') (paused ? micResume() : micPause());   // 输入框 ⏸ 按钮：切暂停录音
-    else if (req.url === '/poke') doBarge();   // 点击桌宠：它在说话就打断、轮到你说（否则忽略）
+    else if (req.url === '/poke') doBarge();   // 点击 Claude Baby：它在说话就打断、轮到你说（否则忽略）
     // 打字聚焦时停麦（区别于 micPause 的粘性暂停；失焦 /mic-on 恢复）
     else if (req.url === '/mic-off') { bumpIdle(); forwarding = false; stopMic(); resetCapture(); chat({ type: 'level', level: 0 }); }
     else if (req.url === '/mic-on')  { bumpIdle(); if (sessionActive && !paused && !panelHidden && !speaking) { forwarding = true; startMic(); } }
@@ -1782,7 +1820,7 @@ controlServer.on('error', (e) => {
 controlServer.listen(CONTROL_PORT, '127.0.0.1', () => console.log(`[control] 控制端口 http://127.0.0.1:${CONTROL_PORT}  (/toggle /poke /model /mode /sessions /session/new /session/switch)`));
 
 // ───────────────────────── 启动 / 退出 ─────────────────────────
-// 启动加载态:桌宠持续【扫地】,直到各方就绪(大脑 brainProc + 本机 whisper 端口响应)再开心一下落回 idle。
+// 启动加载态:Claude Baby 持续【扫地】,直到各方就绪(大脑 brainProc + 本机 whisper 端口响应)再开心一下落回 idle。
 let _bootDone = false;
 function petBootLoading() { sayPet('', ST_WORK, 'clawd-working-sweeping.svg', 600000); }
 function petBootDone() {
@@ -1796,20 +1834,16 @@ function waitBootReady() {
     if (_bootDone) return;
     const elapsed = Date.now() - started, brainUp = !!brainProc;
     if (elapsed > MAX) return petBootDone();                          // 兜底:最多扫 45s
-    if (STT !== 'local') { if (brainUp && elapsed > 2500) return petBootDone(); return void setTimeout(tick, 600); }
-    const probe = http.request({ host: '127.0.0.1', port: WHISPER_PORT, method: 'HEAD', timeout: 700 }, (res) => {
-      res.resume(); if (brainUp) petBootDone(); else setTimeout(tick, 600);   // whisper 端口已响应=模型加载好
-    });
-    probe.on('error', () => setTimeout(tick, 600));
-    probe.on('timeout', () => { try { probe.destroy(); } catch (_) {} });
-    probe.end();
+    // whisper 改为按需加载，开机不再预载 → 就绪只看大脑(brainProc)；whisper 留到喊词时再起。
+    if (brainUp && elapsed > 2500) return petBootDone();
+    return void setTimeout(tick, 600);
   };
   tick();
 }
 petBootLoading();   // 一启动就扫地(clawd 已先于引擎起好,sayPet 能送达)
 bootSession();   // 接上次会话（有记录就 resume），否则全新开
-startWhisperServer();   // STT=local → 拉起常驻 whisper-server（模型只加载一次）
-console.log(STT === 'local' ? `[stt] 本机 whisper-server（${WHISPER_MODEL.split('/').pop()}，离线）` : '[stt] ElevenLabs Scribe（云端兜底）');
+// whisper-server 不再开机常驻：喊词唤醒时按需拉起（边说边加载），闲置自动退掉省内存。
+console.log(STT === 'local' ? `[stt] 本机 whisper-server（${WHISPER_MODEL.split('/').pop()}，离线·按需加载，闲置${Math.round(WHISPER_IDLE_MS / 60000)}分钟退）` : '[stt] ElevenLabs Scribe（云端兜底）');
 // boot 是空闲态(无会话):不空跑 Scribe 麦,改进入空闲唤醒(声纹优先,敲两下兜底)。
 // 会话一开 startSession() 会 stopIdleWake() 并由 resumeListen() 接管 Scribe 麦。
 // 先清掉上一轮引擎被 kill -9 后遗留的孤儿唤醒边车(否则多个边车同时上报 /wake → 一喊连触发两三次)。
@@ -1819,6 +1853,20 @@ setTimeout(startIdleWake, 400);   // 等孤儿被收掉再起自己的边车
 startMusicWatch();                // 音乐联动(配了 App 才起;设置页/落盘的选择会被 loadRuntimeConfig 恢复)
 waitBootReady();                  // 各方就绪后,结束"扫地"加载态
 
+// 优雅退出：右键菜单「退出」和 `hello stop` 都打 /quit 走这里——先用语音道个别（说完才退），再 shutdown 收掉一切。
+// hold 住 HTTP 响应直到道别播完，调用方(curl /Claude Baby)会一直等，避免它在 byebye 还没说完就把引擎 pkill 掉。
+let _quitting = false;
+async function gracefulQuit(res) {
+  if (_quitting) { try { if (res) res.end('{"ok":true}'); } catch (_) {} return; }
+  _quitting = true;
+  console.log('  [quit] 收到退出 → 道别后全关');
+  try {
+    ttsAborted = false; turnAborted = false;   // 清掉打断态，保证这句一定开得了口
+    await speakTTS('Okay~ byebye~');            // 说完这句再退
+  } catch (_) {}
+  try { if (res) { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true,"bye":true}'); } } catch (_) {}
+  shutdown();
+}
 function shutdown() {
   console.log('\n  收尾…');
   try { if (mic) mic.kill('SIGKILL'); } catch (_) {}

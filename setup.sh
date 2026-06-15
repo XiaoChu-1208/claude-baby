@@ -152,7 +152,7 @@ elif ask "Add the 'hello claude' command (appends a function to $RC)?"; then
     printf 'hello() {\n'
     printf '  case "$1" in\n'
     printf '    claude) ( nohup bash "%s/start.sh" >/tmp/coach-launch.log 2>&1 & ) >/dev/null 2>&1; disown 2>/dev/null; echo ""; echo "Hey! Listen! Clawd is starting up in the background."; echo "You can close this terminal window now.";;\n' "$HERE"
-    printf '    stop) pkill -f coach-engine.js 2>/dev/null; pkill -9 -f "clawd-on-desk/node_modules/electron" 2>/dev/null; pkill -f wake-listener.py 2>/dev/null; echo "Stopped Clawd.";;\n'
+    printf '    stop) curl -s -m 8 -X POST http://127.0.0.1:23390/quit >/dev/null 2>&1; pkill -f coach-engine.js 2>/dev/null; pkill -9 -f "clawd-on-desk/node_modules/electron" 2>/dev/null; pkill -f wake-listener.py 2>/dev/null; echo "Okay~ byebye~";;\n'
     printf '    *) echo "Usage: hello claude   (start / restart)\\n       hello stop     (stop everything)";;\n'
     printf '  esac\n}\n'
     printf '# <<< claude-baby hello launcher <<<\n'

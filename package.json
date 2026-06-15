@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Claude Baby — 语音驱动的桌面宠物 Claude 助手：spawn 本机 claude CLI 走订阅 + ElevenLabs STT/TTS + 喊词唤醒，桌宠为身体、本引擎为大脑",
+  "description": "Claude Baby — 语音驱动的桌面宠物 Claude 助手：spawn 本机 claude CLI 走订阅 + ElevenLabs STT/TTS + 喊词唤醒，Claude Baby 为身体、本引擎为大脑",
   "license": "AGPL-3.0-only",
   "scripts": {
     "start": "node server.js",
